@@ -14,5 +14,4 @@ let () =
  (public_name odoc.document)
     |} ^ preprocess ^ {|
  (libraries odoc_model fmt)
- (modules_without_implementation types)
 )|}

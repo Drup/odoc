@@ -41,11 +41,11 @@ module O = struct
     let opened_tag : Source.decoration Stack.t = Stack.create () in
     let push elt = out := (Stack.top_opt opened_tag, elt) :: !out in
     let out_functions = {Format.
-      out_string = (fun s i j -> push [Text (String.sub s i j)]);
+      out_string = (fun s i j -> push [inline @@ Text (String.sub s i j)]);
       out_flush = (fun () -> ());
-      out_newline = (fun () -> push [Linebreak]);
-      out_spaces = (fun n -> push [Text (String.make n ' ')]);
-      out_indent = (fun n -> push [Text (String.make n ' ')])
+      out_newline = (fun () -> push [inline @@ Linebreak]);
+      out_spaces = (fun n -> push [inline @@ Text (String.make n ' ')]);
+      out_indent = (fun n -> push [inline @@ Text (String.make n ' ')])
     }
     and stag_functions =
       let print_open_stag = function
@@ -68,7 +68,7 @@ module O = struct
 
   let elt ppf e = Format.pp_open_stag ppf (Elt e); Format.pp_close_stag ppf ()
 
-  let entity ppf e = elt ppf [Inline.Entity e]
+  let entity ppf e = elt ppf [inline @@ Inline.Entity e]
 
   let spf fmt =
     let flush, ppf = make () in
@@ -96,10 +96,26 @@ module O = struct
       | None -> hd ++ tl
       | Some sep -> hd ++ sep ++ tl
 
-  let code f =
-    [Inline.Source (spf "%t" f)]
+  let render f = spf "%t" f
+  let code ?attr f =
+    [inline ?attr @@ Inline.Source (render f)]
+  let codeblock ?attr f =
+    [block ?attr @@ Block.Source (render f)]
 end
 open O
+
+
+let rec flatmap ?sep ~f = function
+  | [] -> []
+  | [x] -> f x
+  | x :: xs ->
+    let hd = f x in
+    let tl = flatmap ?sep ~f xs in
+    match sep with
+    | None -> hd @ tl
+    | Some sep -> hd @ sep @ tl
+
+
 
 let label = function
   | Odoc_model.Lang.TypeExpr.Label s -> O.df "%s" s
@@ -108,6 +124,9 @@ let label = function
 let keyword keyword =
   O.df "@[<keyword>%s@]" keyword
 
+let tag tag t = 
+  O.df "@[<%s>%t@]" tag t
+
 let type_var tv =
   O.df "@[<type-var>%s@]" tv
 
@@ -115,9 +134,9 @@ let enclose ~l ~r x =
   O.df "%s%t%s" l x r
 
 let resolved p txt =
-  O.df "%a" O.elt [Inline.InternalLink (InternalLink.Resolved (p, txt))]
+  O.df "%a" O.elt [inline @@ InternalLink (InternalLink.Resolved (p, txt))]
 let unresolved txt = 
-  O.df "%a" O.elt [Inline.InternalLink (InternalLink.Unresolved txt)]
+  O.df "%a" O.elt [inline @@ InternalLink (InternalLink.Unresolved txt)]
 
 include Generator_signatures
 
@@ -143,8 +162,8 @@ struct
   let rec from_path : stop_before:bool -> Path.t -> text =
     fun ~stop_before path ->
       match path with
-      | `Root root -> unresolved [Text root]
-      | `Forward root -> unresolved [Text root] (* FIXME *)
+      | `Root root -> unresolved [inline @@ Text root]
+      | `Forward root -> unresolved [inline @@ Text root] (* FIXME *)
       | `Dot (prefix, suffix) ->
         let link = from_path ~stop_before:true (prefix :> Path.t) in
         link ++ O.txt ("." ^ suffix) 
@@ -157,7 +176,7 @@ struct
         let txt = Url.render_path path in
         begin match Url.from_identifier ~stop_before id with
         | Ok href ->
-          resolved href [Text txt]
+          resolved href [inline @@ Text txt]
         | Error Url.Error.Not_linkable _ -> O.txt txt
         | Error exn ->
           Printf.eprintf "Id.href failed: %S\n%!" (Url.Error.to_string exn);
@@ -201,26 +220,26 @@ struct
       let id = (base :> Identifier.t) in
       begin match Url.from_identifier ~stop_before:true id with
       | Ok href ->
-        resolved href [Inline.Text (Identifier.name id)]
+        resolved href [inline @@ Text (Identifier.name id)]
       | Error (Not_linkable _) ->
-        unresolved [Inline.Text (Identifier.name id)]
+        unresolved [inline @@ Text (Identifier.name id)]
       | Error exn ->
         Printf.eprintf "[FRAG] Id.href failed: %S\n%!"
           (Url.Error.to_string exn);
-        unresolved [Inline.Text (Identifier.name id)]
+        unresolved [inline @@ Text (Identifier.name id)]
       end
     | `Resolved rr ->
       let id = Resolved.identifier base (rr :> Resolved.t) in
       let txt = render_resolved_fragment rr in
       begin match Url.from_identifier ~stop_before id with
       | Ok href ->
-        resolved href [Inline.Text txt]
+        resolved href [inline @@ Text txt]
       | Error (Not_linkable _) ->
-        unresolved [Inline.Text txt]
+        unresolved [inline @@ Text txt]
       | Error exn ->
         Printf.eprintf "[FRAG] Id.href failed: %S\n%!"
           (Url.Error.to_string exn);
-        unresolved [Inline.Text txt]
+        unresolved [inline @@ Text txt]
       end
     | `Dot (prefix, suffix) ->
       let link = fragment_to_ir ~stop_before:true ~base (prefix :> Fragment.t) in
@@ -460,54 +479,50 @@ struct
       | Error e -> failwith (Url.Error.to_string e)
       | Ok { anchor; kind; _ } ->
         let name = Paths.Identifier.name id in
+        let attrs = [Attr.Class "def"; Attr.Class kind] in
         let cell =
-          O.td ~a:[ O.a_class ["def"; kind ] ]
-            [O.a ~a:[O.a_href ("#" ^ anchor); O.a_class ["anchor"]] []
-            ; O.code (
+          (* O.td ~a:[ O.a_class ["def"; kind ] ]
+           *   [O.a ~a:[O.a_href ("#" ^ anchor); O.a_class ["anchor"]] []
+           *   ; *)
+              O.code (
                 (if mutable_ then keyword "mutable" ++ O.txt " " else O.noop)
                 ++ O.txt name
                 ++ O.txt Syntax.Type.annotation_separator
                 ++ type_expr typ
                 ++ O.txt Syntax.Type.Record.field_separator
               )
-            ]
+            (* ] *)
         in
-        anchor, cell
+        anchor, attrs, cell
     in
     let rows =
       fields |> List.map (fun fld ->
         let open Odoc_model.Lang.TypeDecl.Field in
-        let anchor, lhs =
+        let anchor, attrs, code =
           field fld.mutable_ (fld.id :> Paths.Identifier.t) fld.type_
         in 
         let rhs = Comment.to_ir fld.doc in
-        O.tr ~a:[ O.a_id anchor; O.a_class ["anchored"] ] (
-          lhs ++
-          if not (Comment.has_doc fld.doc) then [] else [
-            O.td ~a:[ O.a_class ["doc"] ] rhs
-          ]
-        )
+        let doc = if not (Comment.has_doc fld.doc) then [] else rhs in
+        DocumentedSrc.{ anchor; attrs; code; doc }
       )
     in
-    O.code (O.txt "{")
-    @ O.table ~a:[ O.a_class ["record"] ] rows
-    @ O.code (O.txt "}")
- 
+    let attr = [Attr.Class "record"] in
+    O.code (O.txt "{") @
+      [inline ~attr @@ DocumentedSrc rows] @
+      O.code (O.txt "}")        
 
 
   let constructor
     : Paths.Identifier.t -> Odoc_model.Lang.TypeDecl.Constructor.argument
-    -> Odoc_model.Lang.TypeExpr.t option
-    -> [> `Code | `PCDATA | `Table ] O.elt list
-  = fun id args ret_type ->
+      -> Odoc_model.Lang.TypeExpr.t option
+      -> Inline.t
+    = fun id args ret_type ->
       let name = Paths.Identifier.name id in
-      let cstr =
-        O.span
-          ~a:[O.a_class [Url.kind_of_id_exn id]] [O.txt name]
-      in
+      let kind = Url.kind id in
+      let cstr = tag kind (O.txt name) in
       let is_gadt, ret_type =
         match ret_type with
-        | None -> false, []
+        | None -> false, O.noop
         | Some te ->
           let constant =
             match args with
@@ -516,79 +531,74 @@ struct
           in
           let ret_type =
             O.txt " " ++
-            (if constant then O.txt ":" else Syntax.Type.GADT.arrow) ++
-            O.txt " " ++
-            type_expr te
+              (if constant then O.txt ":" else Syntax.Type.GADT.arrow) ++
+              O.txt " " ++
+              type_expr te
           in
           true, ret_type
       in
       match args with
-      | Tuple [] -> [ O.code (cstr ++ ret_type) ]
+      | Tuple [] -> O.code (cstr ++ ret_type)
       | Tuple lst ->
         let params = O.list lst
-          ~sep:(O.txt Syntax.Type.Tuple.element_separator)
-          ~f:(type_expr ~needs_parentheses:is_gadt)
+            ~sep:(O.txt Syntax.Type.Tuple.element_separator)
+            ~f:(type_expr ~needs_parentheses:is_gadt)
         in
-        [ O.code (
-            cstr ++
+        O.code (
+          cstr ++
             (
               if Syntax.Type.Variant.parenthesize_params
-              then O.txt "(" ++ params ++ [ O.txt ")" ]
+              then O.txt "(" ++ params ++ O.txt ")"
               else
                 (if is_gadt then
-                  [O.txt Syntax.Type.annotation_separator]
-                else
-                  [O.txt " "; keyword "of"; O.txt " "]) ++
-                params
+                    O.txt Syntax.Type.annotation_separator
+                  else
+                    O.txt " " ++ keyword "of" ++ O.txt " ") ++
+                  params
             )
-            ++ ret_type
-          )
-        ]
+          ++ ret_type
+        )
       | Record fields ->
         if is_gadt then
-          (O.code [cstr; O.txt Syntax.Type.annotation_separator])
-          ++(record fields)
-          ++ [O.code ret_type]
+          (O.code (cstr ++ O.txt Syntax.Type.annotation_separator))
+          @ record fields
+          @ O.code ret_type
         else
           (O.code
-            [cstr; O.txt " "; keyword "of"; O.txt " "])++(record fields)
+              (cstr ++ O.txt " " ++ keyword "of" ++ O.txt " "))
+          @ record fields
 
 
 
-  let variant cstrs : [> Html_types.table ] O.elt =
+  let variant cstrs : Inline.t =
     let constructor id args res =
       match Url.from_identifier ~stop_before:true id with
       | Error e -> failwith (Url.Error.to_string e)
       | Ok { anchor; kind; _ } ->
+        let attrs = [Attr.Class "def" ; Attr.Class kind] in
         let cell =
-          O.td ~a:[ O.a_class ["def"; kind ] ] (
-            O.a ~a:[O.a_href ("#" ^ anchor); O.a_class ["anchor"]]
-              [] ++
-            O.code [O.txt "| " ] ++
+          O.code (O.txt "| ") @
             constructor id args res
-          )
         in
-        anchor, cell
+        anchor, attrs, cell
     in
     match cstrs with
-    | [] -> O.code [ O.txt "|" ]
+    | [] -> O.code (O.txt "|")
     | _ :: _ ->
       let rows =
         cstrs |> List.map (fun cstr ->
           let open Odoc_model.Lang.TypeDecl.Constructor in
-          let anchor, lhs = constructor (cstr.id :> Paths.Identifier.t) cstr.args cstr.res in
-          let rhs = Comment.to_html cstr.doc in
-          let rhs = (rhs :> (Html_types.td_content O.elt) list) in
-          O.tr ~a:[ O.a_id anchor; O.a_class ["anchored"] ] (
-            lhs ++
-            if not (Comment.has_doc cstr.doc) then [] else [
-              O.td ~a:[ O.a_class ["doc"] ] rhs
-            ]
-          )
+          let anchor, attrs, code =
+            constructor (cstr.id :> Paths.Identifier.t) cstr.args cstr.res
+          in
+          let rhs = Comment.to_ir cstr.doc in
+          let doc = if not (Comment.has_doc cstr.doc) then [] else rhs in
+          DocumentedSrc.{ anchor; attrs; code; doc }
         )
       in
-      O.table ~a:[ O.a_class ["variant"] ] rows
-
+      let attr = [Attr.Class "variant"] in
+      [inline ~attr @@ DocumentedSrc rows]
+ 
 
 
   let extension_constructor (t : Odoc_model.Lang.Extension.Constructor.t) =
@@ -597,26 +607,26 @@ struct
 
   let extension (t : Odoc_model.Lang.Extension.t) =
     let extension =
-      O.code (
-        keyword "type" ++
-        O.txt " " ++
-        Tree.Relative_link.of_path ~stop_before:false (t.type_path :> Paths.Path.t) ++
-        [ O.txt " += " ]
-      ) ++
-      O.list t.constructors ~sep:(O.code [O.txt " | "])
-        ~f:extension_constructor
-      ++ (if Syntax.Type.type_def_semicolon then [ O.txt ";" ] else [])
-    in
-    extension, t.doc
+      O.code (keyword "type" ++
+          O.txt " " ++
+          Link.from_path ~stop_before:false (t.type_path :> Paths.Path.t) ++
+          O.txt " += ")
+      @ 
+        flatmap t.constructors ~sep:[inline @@ Text " | "]
+          ~f:extension_constructor
+      @ 
+        O.code (if Syntax.Type.type_def_semicolon then O.txt ";" else O.noop)
+    in 
+    [block (Inline extension)], t.doc
 
 
 
   let exn (t : Odoc_model.Lang.Exception.t) =
     let cstr = constructor (t.id :> Paths.Identifier.t) t.args t.res in
-    let exn = O.code [ keyword "exception"; O.txt " " ] ++ cstr
-      ++ (if Syntax.Type.Exception.semicolon then [ O.txt ";" ] else [])
+    let exn = O.code ( keyword "exception" ++ O.txt " " ) @ cstr
+      @ O.code (if Syntax.Type.Exception.semicolon then O.txt ";" else O.noop)
     in
-    exn, t.doc
+    [block (Inline exn)], t.doc
 
 
 
@@ -627,12 +637,12 @@ struct
       let kind_approx, cstr, doc =
         match item with
         | Odoc_model.Lang.TypeExpr.Polymorphic_variant.Type te ->
-          "unknown", [O.code (type_expr te)], None
+          "unknown", O.code (type_expr te), None
         | Constructor {constant; name; arguments; doc; _} ->
           let cstr = "`" ^ name in
           "constructor",
           begin match arguments with
-          | [] -> [O.code [ O.txt cstr ]]
+          | [] -> O.code (O.txt cstr)
           | _ ->
             (* Multiple arguments in a polymorphic variant constructor correspond
                to a conjunction of types, not a product: [`Lbl int&float].
@@ -642,79 +652,73 @@ struct
             let wrapped_type_expr =
               (* type conjunction in Reason is printed as `Lbl (t1)&(t2)` *)
               if Syntax.Type.Variant.parenthesize_params then
-                fun x -> O.txt "(" ++ type_expr x ++ [O.txt ")"]
+                fun x -> O.txt "(" ++ type_expr x ++ O.txt ")"
               else
                 fun x -> type_expr x
             in
             let params = O.list arguments
-              ~sep:(O.txt " & ")
-              ~f:wrapped_type_expr
+                ~sep:(O.txt " & ")
+                ~f:wrapped_type_expr
             in
             let params =
               if constant then O.txt "& " ++ params else params in
-            [ O.code (
-                O.txt cstr ++
+            O.code (
+              O.txt cstr ++
                 (
-                if Syntax.Type.Variant.parenthesize_params
-                then params
-                else O.txt " " ++ keyword "of" ++ O.txt " " ++ params
+                  if Syntax.Type.Variant.parenthesize_params
+                  then params
+                  else O.txt " " ++ keyword "of" ++ O.txt " " ++ params
                 )
-              )
-            ]
+            )             
           end,
           match doc with
           | [] ->
             None
           | _ ->
-            Some (Comment.to_html doc :> (Html_types.td_content O.elt) list)
+            Some (Comment.to_ir doc)
       in
       try
         let { Url.Anchor. name = anchor; kind } =
           Url.Anchor.Polymorphic_variant_decl.from_element ~type_ident item
         in
-        let constructor_column =
-          O.td ~a:[ O.a_class ["def"; kind] ] (
-            O.a ~a:[
-              Tyxml.O.a_href ("#" ^ anchor); O.a_class ["anchor"] ] [] ++
-            O.code [O.txt "| " ] ++
-            cstr)
+        let attrs = [Attr.Class "def"; Attr.Class kind] in
+        let code =
+          O.code (O.txt "| ") @ cstr
         in
-        let columns =
-          match doc with
-          | None ->
-            [constructor_column]
-          | Some doc ->
-            [constructor_column; O.td ~a:[O.a_class ["doc"]] doc]
+        let doc = match doc with
+          | None -> []
+          | Some doc -> doc
         in
-        O.tr ~a:[ O.a_id anchor; O.a_class ["anchored"] ] columns
+        DocumentedSrc.{ attrs ; anchor ; code ; doc }
       with Failure s ->
         Printf.eprintf "ERROR: %s\n%!" s;
-        O.tr [
-          O.td ~a:[ O.a_class ["def"; kind_approx] ] (
-            O.code [O.txt "| " ] ++
-            cstr
-          );
-        ]
+        let code = O.code (O.txt "| " ) @ cstr in
+        let attrs = [Attr.Class "def"; Attr.Class kind_approx] in
+        let doc = [] in
+        let anchor = "" in
+        DocumentedSrc.{ attrs ; anchor ; code ; doc }
     in
-    let table =
-      O.table ~a:[O.a_class ["variant"]] (List.map row t.elements) in
+    let variants = 
+      let attr = [Attr.Class "variant"] in
+      [inline ~attr @@ DocumentedSrc (List.map row t.elements)]
+    in
     match t.kind with
     | Fixed ->
-      O.code [O.txt "[ "] ++ table ++ [O.code [O.txt " ]"]]
+      O.code (O.txt "[ ") @ variants @ O.code (O.txt " ]")
     | Open ->
-      O.code [O.txt "[> "] ++ table ++ [O.code [O.txt " ]"]]
+      O.code (O.txt "[> ") @ variants @ O.code (O.txt " ]")
     | Closed [] ->
-      O.code [O.txt "[< "] ++ table ++ [O.code [O.txt " ]"]]
+      O.code (O.txt "[< ") @ variants @ O.code (O.txt " ]")
     | Closed lst ->
       let constrs = String.concat " " lst in
-      O.code [O.txt "[< "] ++ table ++
-        [O.code [O.txt (" " ^ constrs ^ " ]")]]
-
+      O.code (O.txt "[< ")
+      @ variants
+      @ O.code (O.txt (" " ^ constrs ^ " ]"))
  
 
   let format_params
     : 'row. ?delim:[`parens | `brackets] -> Odoc_model.Lang.TypeDecl.param list
-    -> Inline.t
+    -> text
   = fun ?(delim=`parens) params ->
     let format_param (desc, variance_opt) =
       let param_desc =
@@ -756,13 +760,13 @@ struct
     let _ = compact_variants in (* TODO *)
     let private_ = equation.private_ in
     match equation.manifest with
-    | None -> [], private_
+    | None -> O.noop, private_
     | Some t ->
       let manifest =
         O.txt (if is_substitution then " := " else " = ") ++
         (if private_ then
-          [keyword Syntax.Type.private_keyword; O.txt " "]
-        else []) ++
+            keyword Syntax.Type.private_keyword ++ O.txt " "
+        else O.noop) ++
         type_expr t
       in
       manifest, false
@@ -777,17 +781,19 @@ struct
       match t.equation.manifest with
       | Some (Odoc_model.Lang.TypeExpr.Polymorphic_variant variant) ->
         let manifest =
-          (O.txt (if is_substitution then " := " else " = ") ++
+          O.code (O.txt (if is_substitution then " := " else " = ") ++
           if t.equation.private_ then
-            [keyword Syntax.Type.private_keyword; O.txt " "]
+            keyword Syntax.Type.private_keyword ++ O.txt " "
           else
-            []) ++
+            O.noop) @
           polymorphic_variant ~type_ident:(t.id :> Paths.Identifier.t) variant
         in
         manifest, false
       | _ ->
-        let manifest, need_private = format_manifest ~is_substitution t.equation in
-        Utils.optional_code manifest, need_private
+        let manifest, need_private =
+          format_manifest ~is_substitution t.equation
+        in
+        O.code manifest, need_private
     in
     let representation = 
       match t.representation with
@@ -802,29 +808,26 @@ struct
         ) @
         match repr with
         | Extensible -> O.code (O.txt "..") 
-        | Variant cstrs -> [variant cstrs]
+        | Variant cstrs -> variant cstrs
         | Record fields -> record fields
     in
     let tdecl_def =
       let keyword' =
         match recursive with
-        | Ordinary | Rec -> [keyword "type"]
-        | And -> [keyword "and"]
-        | Nonrec -> [keyword "type"; O.txt " "; keyword "nonrec"]
+        | Ordinary | Rec -> keyword "type"
+        | And -> keyword "and"
+        | Nonrec -> keyword "type" ++ O.txt " " ++ keyword "nonrec"
       in
-
       O.code (
           keyword' ++ O.txt " "
-          ++ (Syntax.Type.handle_constructor_params [O.txt tyname] [params])
-        ) ::
-        O.spf
-          "%t%t%t%s"
-          manifest
-          representation
-          Utils.optional_code constraints
-          (if Syntax.Type.type_def_semicolon then ";" else "")
+          ++ (Syntax.Type.handle_constructor_params (O.txt tyname) params)
+        )
+      @ manifest
+      @ representation
+      @ O.code constraints
+      @ O.code (if Syntax.Type.type_def_semicolon then O.txt ";" else O.noop)
     in
-    tdecl_def, t.doc
+    [block (Block.Paragraph tdecl_def)], t.doc
 end
 open Type_declaration
 
@@ -844,9 +847,9 @@ struct
       O.txt name ++
       O.txt Syntax.Type.annotation_separator ++
       type_expr t.type_
-      ++ (if Syntax.Value.semicolon then [ O.txt ";" ] else [])
+      ++ (if Syntax.Value.semicolon then O.txt ";" else O.noop)
     in
-    [O.code value], t.doc
+    O.codeblock value, t.doc
 
   let external_ (t : Odoc_model.Lang.External.t) =
     let name = Paths.Identifier.name t.id in
@@ -856,9 +859,9 @@ struct
       O.txt name ++
       O.txt Syntax.Type.annotation_separator ++
       type_expr t.type_
-      ++ (if Syntax.Type.External.semicolon then [ O.txt ";" ] else [])
+      ++ (if Syntax.Type.External.semicolon then O.txt ";" else O.noop)
     in
-    [O.code external_], t.doc
+    O.codeblock external_, t.doc
 end
 open Value
 
@@ -869,7 +872,7 @@ end =
 struct
   let module_substitution (t : Odoc_model.Lang.ModuleSubstitution.t) =
     let name = Paths.Identifier.name t.id in
-    let path = Tree.Relative_link.of_path ~stop_before:true (t.manifest :> Paths.Path.t) in
+    let path = Link.from_path ~stop_before:true (t.manifest :> Paths.Path.t) in
     let value =
       keyword "module" ++
       O.txt " " ++
@@ -877,7 +880,7 @@ struct
       O.txt " := " ++
       path
     in
-    [O.code value], t.doc
+    O.codeblock value, t.doc
 end
 open ModuleSubstitution
 

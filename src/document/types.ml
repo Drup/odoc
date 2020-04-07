@@ -15,16 +15,26 @@ type style = [
 
 module rec Attr : sig
 
-  type one = string * string
+  type one =
+    | Class of string
+    | Other of string * string
   type t = one list
 
-end
+end = Attr
 
 and Tabular : sig
 
-  type t = Block.t list list
+  type t = {
+    header : line option ;
+    lines : line List.t ;
+  }
 
-end
+  and line = {
+    attr : Attr.t ;
+    desc : Block.t list ;
+  }
+        
+end = Tabular
 
 and InternalLink : sig
 
@@ -34,14 +44,14 @@ and InternalLink : sig
     | Resolved of resolved
     | Unresolved of Inline.t
 
-end
+end = InternalLink
 
 and Raw_markup : sig
 
   type target = Odoc_model.Comment.raw_markup_target 
   and t = target * string
 
-end
+end = Raw_markup
 
 and Source : sig
 
@@ -49,13 +59,29 @@ and Source : sig
   and decoration = string
   and token = decoration option * Inline.t
 
-end
+end = Source
+
+and DocumentedSrc : sig
+
+  type t = line list
+  and line = {
+    attrs : Attr.t ;
+    anchor : string ;
+    code : Inline.t ;
+    doc : Block.t ;
+  }
+end = DocumentedSrc
 
 and Inline : sig
 
   type t = one list
 
-  and one =
+  and one = {
+    attr : Attr.t ;
+    desc : desc ;
+  }
+  
+  and desc =
     | Text of string
     | Entity of entity
     | Linebreak
@@ -65,8 +91,9 @@ and Inline : sig
     | Source of Source.t
     | Verbatim of string
     | Raw_markup of Raw_markup.t
-  
-end
+    | DocumentedSrc of DocumentedSrc.t
+
+end = Inline
 
 and Heading : sig
 
@@ -76,13 +103,18 @@ and Heading : sig
     title : Inline.t ;
   }
 
-end
+end = Heading
 
 and Block : sig
 
   type t = one list
 
-  and one =
+  and one = {
+    attr : Attr.t ;
+    desc : desc ;
+  }
+  
+  and desc =
     | Inline of Inline.t
     | Paragraph of Inline.t
     | List of list_type * t list
@@ -98,9 +130,13 @@ and Block : sig
     (* | Title of Level.title * Inline.seq *)
     | Rule
     | Raw_markup of Raw_markup.t
+    | DocumentedSrc of DocumentedSrc.t
 
   and list_type =
     | Ordered
     | Unordered
   
-end
+end = Block
+
+let inline ?(attr=[]) desc = Inline.{attr ; desc}
+let block ?(attr=[]) desc = Block.{attr ; desc}

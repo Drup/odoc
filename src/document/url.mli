@@ -38,6 +38,8 @@ val from_reference
   -> Reference.Resolved.t
   -> (t, Error.t) result
 
+val kind : Identifier.t -> string
+
 val render_path : Path.t -> string
 
 module Anchor : sig

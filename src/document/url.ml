@@ -377,6 +377,11 @@ let rec from_reference : stop_before:bool ->
     from_reference ~stop_before:false
       (p :> Reference.Resolved.t)
 
+let kind id =
+  match from_identifier ~stop_before:true id with
+  | Error e -> failwith (Error.to_string e)
+  | Ok { kind; _ } -> kind
+
 let render_path : Odoc_model.Paths.Path.t -> string =
   let open Odoc_model.Paths.Path in
   let rec render_resolved : Odoc_model.Paths.Path.Resolved.t -> string =
