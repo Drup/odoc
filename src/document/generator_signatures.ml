@@ -90,8 +90,8 @@ sig
 
   module Mod :
   sig
-    val open_tag : Inline.t
-    val close_tag : Inline.t
+    val open_tag : text
+    val close_tag : text
     val close_tag_semicolon : bool
     val include_semicolon : bool
     val functor_keyword : bool
@@ -99,8 +99,8 @@ sig
 
   module Class :
   sig
-    val open_tag : Inline.t
-    val close_tag : Inline.t
+    val open_tag : text
+    val close_tag : text
   end
 
   module Value :

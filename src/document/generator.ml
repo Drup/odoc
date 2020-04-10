@@ -922,6 +922,8 @@ module Top_level_markup :
 sig
   type heading_level_shift
 
+  type item = [ `Decl of rendered_item | `Nested of Nested.t ]
+  
   val lay_out :
     heading_level_shift option ->
     item_to_id:('item -> string option) ->
@@ -929,45 +931,22 @@ sig
     render_leaf_item:('item -> rendered_item * Odoc_model.Comment.docs) ->
     render_nested_article:
       (heading_level_shift -> 'item ->
-        rendered_item * Odoc_model.Comment.docs * toc * Tree.t list) ->
-    ((_, 'item) tagged_item) list ->
-      (Html_types.div_content O.elt) list * toc * Tree.t list
+         item * Odoc_model.Comment.docs * toc * Page.t list) ->
+    ((_, 'item) tagged_item) list -> Item.t list * toc * Page.t list
 
   val render_toc :
-    toc -> ([> Html_types.flow5_without_header_footer ] O.elt) list
+    toc -> Toc.t
 
-  val lay_out_page : Odoc_model.Comment.docs ->
-      ((Html_types.div_content O.elt) list *
-       (Html_types.flow5_without_header_footer O.elt) list *
-       toc)
+  val lay_out_page :
+    Odoc_model.Comment.docs -> Item.t list * Block.t * toc
 end =
 struct
-  (* Just some type abbreviations. *)
-  type html = Html_types.flow5 O.elt
-  type comment_html = Html_types.flow5_without_header_footer O.elt
-
-
-
-  let add_anchor item_to_id item html =
-    match item_to_id item with
-    | None ->
-      html,
-      []
-    | Some anchor_text ->
-      let anchor =
-        O.a
-          ~a:[O.a_href ("#" ^ anchor_text); O.a_class ["anchor"]]
-          []
-      in
-      anchor++html,
-      [O.a_id anchor_text]
-
 
 (* Adds spec class to the list of existing item attributes. *)
-  let add_spec item_to_spec item a =
+  let mk_class item_to_spec item =
     match item_to_spec item with
-    | Some spec -> O.a_class ["spec " ^ spec] ++ a
-    | None -> a
+    | Some spec -> [Attr.Class ("spec " ^ spec)]
+    | None -> []
 
 
   (* "Consumes" adjacent leaf items of the same kind, until one is found with
@@ -975,40 +954,35 @@ struct
      the last item (if any), into a <dl> element. The rendered <dl> element is
      paired with the list of unconsumed items remaining in the input. *)
   let leaf_item_group
-      item_to_id item_to_spec render_leaf_item first_item_kind items
-      : html * 'item list =
-
-    let rec consume_leaf_items_until_one_is_documented =
-        fun items acc ->
-
+      item_to_id item_to_spec render_leaf_item first_item_kind items =
+    let rec consume_leaf_items_until_one_is_documented items acc =
       match items with
       | (`Leaf_item (this_item_kind, item))::items
-          when this_item_kind = first_item_kind ->
-
-        let html, maybe_docs = render_leaf_item item in
-        let html, maybe_id = add_anchor item_to_id item html in
-        let a = add_spec item_to_spec item maybe_id in
-        let html = O.dt ~a html in
-        let acc = html++acc in
-
+        when this_item_kind = first_item_kind ->
+        let content, maybe_docs = render_leaf_item item in
+        let anchor = item_to_id item in
+        let attr = mk_class item_to_spec item in
+        let decl = {Item. attr ; anchor ; content } in
         begin match maybe_docs with
         | [] ->
-          consume_leaf_items_until_one_is_documented items acc
-        | docs ->
-          let docs = Comment.to_html docs in
-          let docs = (docs :> (Html_types.dd_content O.elt) list) in
-          let docs = O.dd docs in
-          List.rev (docs++acc), items
+          consume_leaf_items_until_one_is_documented items (decl::acc)
+        | docs -> 
+          let docs = Comment.to_ir docs in
+          let decls = List.rev (decl::acc) in
+          let grouped_item =
+            Item.Declarations (decls, Some docs)
+          in
+          grouped_item, items
         end
-
       | _ ->
-        List.rev acc, items
+        let decl = List.rev acc in
+        Item.Declarations (decl, None), items
     in
 
     let rendered_item_group, remaining_items =
       consume_leaf_items_until_one_is_documented items [] in
 
-    O.dl rendered_item_group, remaining_items
+    rendered_item_group, remaining_items
 
 
 
@@ -1030,25 +1004,23 @@ struct
      renders it as HTML. The returned HTML is paired with the remainder of the
      comment, which will either start with the next section heading in the
      comment, or be empty if there are no section headings. *)
-  let render_comment_until_heading_or_end
-      : Odoc_model.Comment.docs -> comment_html list * Odoc_model.Comment.docs =
-      fun docs ->
-
+  let render_comment_until_heading_or_end docs =
     let rec scan_comment acc docs =
       match docs with
       | [] -> List.rev acc, docs
       | block::rest ->
         match block.Location.value with
         | `Heading _ -> List.rev acc, docs
-        | _ -> scan_comment (block++acc) rest
+        | _ -> scan_comment (block :: acc) rest
     in
     let included, remaining = scan_comment [] docs in
-    let docs = Comment.to_html included in
+    let docs = Comment.to_ir included in
     docs, remaining
 
 
   type heading_level_shift = int
 
+  type item = [ `Decl of rendered_item | `Nested of Nested.t ]
 
   (* The sectioning functions take several arguments, and return "modified"
      instances of them as results. So, it is convenient to group them into a
@@ -1071,21 +1043,22 @@ struct
      functions. *)
   type ('kind, 'item) sectioning_state = {
     input_items : (('kind, 'item) tagged_item) list;
-    acc_subpages : Tree.t list;
+    acc_subpages : Page.t list;
     comment_state : comment_state;
     item_to_id : 'item -> string option;
     item_to_spec : 'item -> string option;
     render_leaf_item : 'item -> rendered_item * Odoc_model.Comment.docs;
-    render_nested_article :
+    render_nested_article : 
       heading_level_shift -> 'item ->
-      rendered_item * Odoc_model.Comment.docs * toc * Tree.t list;
+      [`Decl of rendered_item | `Nested of Nested.t ] *
+        Odoc_model.Comment.docs * toc * Page.t list;
   }
 
 
   (* Comment state used to generate HTML and TOC for both mli and mld inputs. *)
   and comment_state = {
     input_comment : Odoc_model.Comment.docs;
-    acc_html : html list;
+    acc_html : Item.t list;
     acc_toc : toc;
   }
 
@@ -1131,7 +1104,7 @@ struct
     | tagged_item::input_items ->
       match tagged_item with
       | `Leaf_item (kind, _) ->
-        let html, input_items =
+        let ir, input_items =
           leaf_item_group
             state.item_to_id
             state.item_to_spec
@@ -1142,30 +1115,34 @@ struct
         section_items level_shift section_level {state with
             input_items;
             comment_state = { state.comment_state with
-              acc_html = html++state.comment_state.acc_html };
+              acc_html = ir :: state.comment_state.acc_html };
           }
 
       | `Nested_article item ->
-        let html, maybe_docs, toc, subpages =
+        let rendered_item, maybe_docs, toc, subpages =
           state.render_nested_article (level_to_int section_level) item
         in
-        let html, maybe_id = add_anchor state.item_to_id item html in
-        let a = add_spec state.item_to_spec item maybe_id in
-        let html =
+        let anchor = state.item_to_id item in
+        let attr = mk_class state.item_to_spec item in
+        let docs =
           match maybe_docs with
-          | [] -> O.div ~a html
-          | docs ->
-            let docs = Comment.first_to_html docs in
-            let docs = (docs :> (Html_types.dd_content O.elt) list) in
-            O.dl [O.dt ~a html; O.dd docs]
+          | [] -> None
+          | docs -> Some (Comment.first_to_ir docs)
+        in
+        let ir = match rendered_item with 
+          | `Decl content ->
+            let decl = {Item. content ; attr ; anchor } in
+            Item.Declarations ([decl], docs)
+          | `Nested content -> 
+            Item.Nested ({Item. content ; attr ; anchor }, docs)
         in
         section_items level_shift section_level { state with
           input_items;
           comment_state = { state.comment_state with
-            acc_html = html++state.comment_state.acc_html;
+            acc_html = ir :: state.comment_state.acc_html;
             acc_toc = List.rev_append toc state.comment_state.acc_toc;
           };
-          acc_subpages = state.acc_subpages ++ subpages;
+          acc_subpages = state.acc_subpages @ subpages;
         }
 
       | `Comment `Stop ->
@@ -1207,15 +1184,15 @@ struct
              comment matter goes into a <header> element. The nested HTML will
              then be extended recursively by parsing more structure items,
              including, perhaps, additional comments in <aside> elements. *)
-          let heading_html = Comment.to_html [element] in
-          let more_comment_html, input_comment =
+          let heading_ir = Comment.to_ir [element] in
+          let more_comment_ir, input_comment =
             render_comment_until_heading_or_end input_comment in
-          let html = O.header (heading_html ++ more_comment_html) in
+          let header = heading_ir @ more_comment_ir in
           let nested_section_state =
             { state with
               comment_state = {
                 input_comment;
-                acc_html = [html];
+                acc_html = [];
                 acc_toc = [];
               }
             }
@@ -1225,8 +1202,10 @@ struct
           in
           (* Wrap the nested section in a <section> element, and extend the
             table of contents. *)
-          let html = O.section nested_section_state.comment_state.acc_html in
+          let section = nested_section_state.comment_state.acc_html in
 
+          let item = Item.Section (header, section) in
+          
           let `Label (_, label) = label in
           let toc_entry =
             {
@@ -1242,19 +1221,20 @@ struct
              everything else. *)
           section_comment level_shift section_level {nested_section_state with
               comment_state = { nested_section_state.comment_state with
-                acc_html = html++state.comment_state.acc_html;
-                acc_toc = toc_entry++state.comment_state.acc_toc;
+                acc_html = item :: state.comment_state.acc_html;
+                acc_toc = toc_entry :: state.comment_state.acc_toc;
               }
             }
 
       | _ ->
-        let html, input_comment =
-          render_comment_until_heading_or_end state.comment_state.input_comment in
-        let html = (html :> (Html_types.aside_content O.elt) list) in
+        let content, input_comment =
+          render_comment_until_heading_or_end state.comment_state.input_comment
+        in
+        let item = Item.Text { anchor = None ; attr = [] ; content } in
         section_comment level_shift section_level {state with
             comment_state = { state.comment_state with
               input_comment;
-              acc_html = (O.aside html)++state.comment_state.acc_html;
+              acc_html = item :: state.comment_state.acc_html;
             }
           }
 
@@ -1287,10 +1267,10 @@ struct
     | element::input_comment ->
       begin match element.Location.value with
       | `Heading (`Title, _label, _content) ->
-        let heading_html = Comment.to_html [element] in
-        let more_comment_html, input_comment =
+        let heading_html = Comment.to_ir [element] in
+        let more_comment_ir, input_comment =
           render_comment_until_heading_or_end input_comment in
-        let header_docs = heading_html ++ more_comment_html in
+        let header_docs = heading_html @ more_comment_ir in
         let nested_section_state = {
           input_comment = input_comment;
           acc_html = [];
@@ -1298,7 +1278,7 @@ struct
         } in
         let nested_section_state, header_docs =
           page_section_comment ~header_docs `Section nested_section_state in
-        let acc_html = state.acc_html ++ nested_section_state.acc_html in
+        let acc_html = state.acc_html @ nested_section_state.acc_html in
         page_section_comment ~header_docs section_level
           { nested_section_state with acc_html }
 
@@ -1307,18 +1287,22 @@ struct
           {state with acc_toc = List.rev state.acc_toc}, header_docs
 
       | `Heading (level, label, content) ->
-        let heading_html = Comment.to_html [element] in
-        let more_comment_html, input_comment =
+        let heading_ir = Comment.to_ir [element] in
+        let more_comment_ir, input_comment =
           render_comment_until_heading_or_end input_comment in
-        let acc_html =  heading_html ++ more_comment_html in
-        let acc_html = (acc_html :> (Html_types.flow5 O.elt) list) in
+        let item =
+          Item.Text { attr = [] ; anchor = None ;
+            content = heading_ir @ more_comment_ir }
+        in
         let nested_section_state = {
           input_comment = input_comment;
-          acc_html;
+          acc_html = [item];
           acc_toc = [];
         } in
-        let nested_section_state, header_docs = page_section_comment ~header_docs level nested_section_state in
-        let acc_html = state.acc_html ++ nested_section_state.acc_html in
+        let nested_section_state, header_docs =
+          page_section_comment ~header_docs level nested_section_state
+        in
+        let acc_html = state.acc_html @ nested_section_state.acc_html in
 
         let acc_toc =
           let `Label (_, label) = label in
@@ -1327,18 +1311,19 @@ struct
             text = content;
             children = nested_section_state.acc_toc;
           } in
-          toc_entry ++ state.acc_toc
+          toc_entry :: state.acc_toc
         in
         page_section_comment ~header_docs section_level
           { nested_section_state with acc_html; acc_toc }
 
       | _ ->
-        let html, input_comment =
-          render_comment_until_heading_or_end state.input_comment in
-        let html = (html :> (Html_types.flow5 O.elt) list) in
+        let content, input_comment =
+          render_comment_until_heading_or_end state.input_comment
+        in
+        let item = Item.Text { attr = [] ; anchor = None ; content } in
         page_section_comment ~header_docs section_level {state with
             input_comment;
-            acc_html = html ++ state.acc_html;
+            acc_html = item :: state.acc_html;
           }
       end
 
@@ -1355,31 +1340,15 @@ struct
 
 
   let render_toc toc =
-    let rec section the_section : Html_types.li_content O.elt list =
-      let text = Comment.link_content_to_html the_section.text in
-      let text =
-        (text
-          : Html_types.phrasing_without_interactive O.elt list
-          :> (Html_types.flow5_without_interactive O.elt) list)
-      in
-      let link =
-        O.a
-          ~a:[O.a_href ("#" ^ the_section.anchor)] text
-      in
-      match the_section.children with
-      | [] -> [link]
-      | _ -> [link; sections the_section.children]
-
+    let rec section the_section =
+      let text = Comment.link_content the_section.text in
+      let anchor = the_section.anchor in
+      let children = sections the_section.children in
+      {Toc. text ; anchor ; children }
     and sections the_sections =
-      the_sections
-      |> List.map (fun the_section -> O.li (section the_section))
-      |> O.ul
-
+      List.map section the_sections
     in
-
-    match toc with
-    | [] -> []
-    | _ -> [O.nav ~a:[O.a_class ["toc"]] [sections toc]]
+    sections toc
 end
 
 (* TODO Figure out when this function would fail. It is currently pasted from
@@ -1396,12 +1365,12 @@ let path_to_id path =
 module Class :
 sig
   val class_ :
-    ?theme_uri:Tree.uri -> Lang.Signature.recursive -> Lang.Class.t ->
-      rendered_item * Odoc_model.Comment.docs * toc * Tree.t list
-
+    Lang.Signature.recursive -> Lang.Class.t ->
+      Top_level_markup.item * Odoc_model.Comment.docs * toc * Page.t list
+  
   val class_type :
-    ?theme_uri:Tree.uri -> Lang.Signature.recursive -> Lang.ClassType.t ->
-      rendered_item * Odoc_model.Comment.docs * toc * Tree.t list
+    Lang.Signature.recursive -> Lang.ClassType.t ->
+      Top_level_markup.item * Odoc_model.Comment.docs * toc * Page.t list
 end =
 struct
   let class_signature_item_to_id : Lang.ClassSignature.item -> _ = function
@@ -1424,22 +1393,20 @@ struct
     | InstanceVariable _ -> `Leaf_item (`Variable, item)
     | Constraint _ -> `Leaf_item (`Constraint, item)
     | Inherit _ -> `Leaf_item (`Inherit, item)
-
     | Comment comment -> `Comment comment
-
-  let rec render_class_signature_item : Lang.ClassSignature.item -> text * _ =
+ 
+  let rec render_class_signature_item : Lang.ClassSignature.item -> Inline.t * _ =
     function
     | Method m -> method_ m
     | InstanceVariable v -> instance_variable v
-    | Constraint (t1, t2) -> format_constraints [(t1, t2)], []
+    | Constraint (t1, t2) -> O.code (format_constraints [(t1, t2)]), []
     | Inherit (Signature _) -> assert false (* Bold. *)
     | Inherit class_type_expression ->
-      [O.code (
+      O.code (
         keyword "inherit" ++
         O.txt " " ++
-        class_type_expr class_type_expression)],
+        class_type_expr class_type_expression),
       []
-
     | Comment _ -> assert false
 
   and class_signature (c : Lang.ClassSignature.t) =
@@ -1451,7 +1418,7 @@ struct
       ~item_to_spec:class_signature_item_to_spec
       ~render_leaf_item:(fun item ->
         let text, docs = render_class_signature_item item in
-        (text :> rendered_item), docs
+        [block @@ Inline text] (* XXX Check *), docs
       )
       ~render_nested_article:(fun _ -> assert false)
       tagged_items
@@ -1459,9 +1426,9 @@ struct
   and method_ (t : Odoc_model.Lang.Method.t) =
     let name = Paths.Identifier.name t.id in
     let virtual_ =
-      if t.virtual_ then [keyword "virtual"; O.txt " "] else [] in
+      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
     let private_ =
-      if t.private_ then [keyword "private"; O.txt " "] else [] in
+      if t.private_ then keyword "private" ++ O.txt " " else O.noop in
     let method_ =
       keyword "method" ++
       O.txt " " ++
@@ -1471,14 +1438,14 @@ struct
       O.txt Syntax.Type.annotation_separator ++
       type_expr t.type_
     in
-    [O.code method_], t.doc
+    O.code method_, t.doc
 
   and instance_variable (t : Odoc_model.Lang.InstanceVariable.t) =
     let name = Paths.Identifier.name t.id in
     let virtual_ =
-      if t.virtual_ then [keyword "virtual"; O.txt " "] else [] in
+      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
     let mutable_ =
-      if t.mutable_ then [keyword "mutable"; O.txt " "] else [] in
+      if t.mutable_ then keyword "mutable" ++ O.txt " " else O.noop in
     let val_ =
       keyword "val" ++
       O.txt " " ++
@@ -1488,19 +1455,17 @@ struct
       O.txt Syntax.Type.annotation_separator ++
       type_expr t.type_
     in
-    [O.code val_], t.doc
+    O.code val_, t.doc
 
   and class_type_expr (cte : Odoc_model.Lang.ClassType.expr) =
     match cte with
     | Constr (path, args) ->
-      let link = Tree.Relative_link.of_path ~stop_before:false (path :> Paths.Path.t) in
+      let link = Link.from_path ~stop_before:false (path :> Paths.Path.t) in
       format_type_path ~delim:(`brackets) args link
     | Signature _ ->
-      [
-        Syntax.Class.open_tag;
-        O.txt " ... ";
-        Syntax.Class.close_tag
-      ]
+      Syntax.Class.open_tag
+      ++ O.txt " ... "
+      ++ Syntax.Class.close_tag
 
   and class_decl (cd : Odoc_model.Lang.Class.decl) =
     match cd with
@@ -1514,27 +1479,35 @@ struct
                   type_expr ~needs_parentheses:true src ++
       O.txt " " ++ Syntax.Type.arrow ++ O.txt " " ++ class_decl dst
 
-  and class_ ?theme_uri recursive (t : Odoc_model.Lang.Class.t) =
+  and class_ recursive (t : Odoc_model.Lang.Class.t) =
     let name = Paths.Identifier.name t.id in
     let params = format_params ~delim:(`brackets) t.params in
     let virtual_ =
-      if t.virtual_ then [keyword "virtual"; O.txt " "] else [] in
+      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
     let cd = class_decl t.type_ in
     let cname, subtree =
       match t.expansion with
       | None -> O.txt name, []
       | Some csig ->
-        Tree.enter ~kind:(`Class) name;
-        let doc = Comment.to_html t.doc in
-        let expansion, toc, _ = class_signature csig in
-        let header_docs =
-          match toc with
-          | [] -> doc
-          | _ -> doc ++ (Top_level_markup.render_toc toc)
+        (* Tree.enter ~kind:(`Class) name; *)
+        let doc = Comment.to_ir t.doc in
+        let items, toc, _ = class_signature csig in
+        let toc = Top_level_markup.render_toc toc in
+        let url =
+          Url.from_identifier_exn ~stop_before:false (t.id :> Paths.Identifier.t)
         in
-        let subtree = Tree.make ~header_docs ?theme_uri expansion [] in
-        Tree.leave ();
-        O.a ~a:[ a_href ~kind:`Class name ] [O.txt name], [subtree]
+        let page = {Page.
+          title = name ;
+          header = doc ;
+          items ;
+          toc ;
+          subpages = [] ;
+          url ;
+        }
+        in
+        let link = resolved url [inline @@ Text name] in
+        (* Tree.leave (); *)
+        link, [page]
     in
     let class_def_content =
       let open Lang.Signature in
@@ -1544,45 +1517,58 @@ struct
         | And -> "and"
       in
       keyword keyword' ++
-      O.txt " " ++
-      virtual_ ++
-      params ++
-      O.txt " " ++
-      cname ++
-      O.txt Syntax.Type.annotation_separator ++
-      cd
+        O.txt " " ++
+        virtual_ ++
+        params ++
+        O.txt " " ++
+        cname ++
+        O.txt Syntax.Type.annotation_separator ++
+        cd
     in
-    let region = [O.code class_def_content] in
-    region, t.doc, [], subtree
+    let region = O.codeblock class_def_content in
+    `Decl region, t.doc, [], subtree
 
 
-  and class_type ?theme_uri recursive (t : Odoc_model.Lang.ClassType.t) =
+  and class_type recursive (t : Odoc_model.Lang.ClassType.t) =
     let name = Paths.Identifier.name t.id in
     let params = format_params ~delim:(`brackets) t.params in
     let virtual_ =
-      if t.virtual_ then [keyword "virtual"; O.txt " "] else [] in
+      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
     let expr = class_type_expr t.expr in
     let cname, subtree =
       match t.expansion with
       | None -> O.txt name, []
       | Some csig ->
-        Tree.enter ~kind:(`Cty) name;
-        let doc = Comment.to_html t.doc in
-        let expansion, _, _ = class_signature csig in
-        let subtree = Tree.make ~header_docs:doc ?theme_uri expansion [] in
-        Tree.leave ();
-        O.a ~a:[ a_href ~kind:`Cty name ] [O.txt name], [subtree]
+        (* Tree.enter ~kind:(`Cty) name; *)
+        let url =
+          Url.from_identifier_exn ~stop_before:false (t.id :> Paths.Identifier.t)
+        in
+        let doc = Comment.to_ir t.doc in
+        let items, toc, _ = class_signature csig in
+        let toc = Top_level_markup.render_toc toc in
+        let page = {Page.
+          title = name ;
+          header = doc ;
+          items ;
+          toc ;
+          subpages = [] ;
+          url ;
+        }
+        in
+        let link = resolved url [inline @@ Text name] in
+        (* Tree.leave (); *)
+        link, [page]
     in
-    let ctyp =
+    let ctyp = 
       let open Lang.Signature in
       let keyword' =
         match recursive with
         | Ordinary | Nonrec | Rec ->
-          [keyword "class"; O.txt " "; keyword "type"]
-        | And -> [keyword "and"]
+          keyword "class" ++ O.txt " " ++ keyword "type"
+        | And -> keyword "and"
       in
       keyword' ++
-      [O.txt " "] ++
+      O.txt " " ++
       virtual_ ++
       params ++
       O.txt " " ++
@@ -1590,8 +1576,8 @@ struct
       O.txt " = " ++
       expr
     in
-    let region = [O.code ctyp] in
-    region, t.doc, [], subtree
+    let region = O.codeblock ctyp in
+    `Decl region, t.doc, [], subtree
 end
 open Class
 
@@ -1601,9 +1587,8 @@ module Module :
 sig
   val signature
     : ?heading_level_shift:Top_level_markup.heading_level_shift
-    -> ?theme_uri:Tree.uri
     -> Lang.Signature.t
-    -> (Html_types.div_content O.elt) list * toc * Tree.t list
+    -> Item.t list * toc * Page.t list
 end =
 struct
   let signature_item_to_id : Lang.Signature.item -> _ = function
@@ -1664,36 +1649,34 @@ struct
     | ModuleSubstitution m -> module_substitution m
     | _ -> assert false
 
-  and render_nested_signature_or_class
-    : ?theme_uri:Tree.uri -> Top_level_markup.heading_level_shift ->
-      Lang.Signature.item -> _ =
-    fun ?theme_uri heading_level item ->
-    match item with
-    | Module (recursive, m) -> module_ ?theme_uri recursive m
-    | ModuleType m -> module_type ?theme_uri m
-    | Class (recursive, c) -> class_ ?theme_uri recursive c
-    | ClassType (recursive, c) -> class_type ?theme_uri recursive c
-    | Include m -> include_ heading_level ?theme_uri m
-    | _ -> assert false
-
-  and signature ?heading_level_shift ?theme_uri s =
+  and signature ?heading_level_shift s =
     let tagged_items = List.map tag_signature_item s in
     Top_level_markup.lay_out
       heading_level_shift
       ~item_to_id:signature_item_to_id
       ~item_to_spec:signature_item_to_spec
       ~render_leaf_item:render_leaf_signature_item
-      ~render_nested_article:(render_nested_signature_or_class ?theme_uri)
+      ~render_nested_article:(render_nested_signature_or_class)
       tagged_items
 
+  and render_nested_signature_or_class
+    : Top_level_markup.heading_level_shift ->
+      Lang.Signature.item -> _ =
+    fun heading_level item ->
+    match item with
+    | Module (recursive, m) -> module_ recursive m
+    | ModuleType m -> module_type m
+    | Class (recursive, c) -> class_ recursive c
+    | ClassType (recursive, c) -> class_type recursive c
+    | Include m -> include_ heading_level m
+    | _ -> assert false
+
   and functor_argument
-    : 'row. ?theme_uri:Tree.uri -> Odoc_model.Lang.FunctorParameter.parameter
-    -> Html_types.div_content O.elt list * Tree.t list
-  = fun ?theme_uri arg ->
+    : Odoc_model.Lang.FunctorParameter.parameter
+    -> Block.t * Page.t list
+  = fun arg ->
     let open Odoc_model.Lang.FunctorParameter in
     let name = Paths.Identifier.name arg.id in
-    let nb = functor_arg_pos arg in
-    let link_name = Printf.sprintf "%d-%s" nb name in
     let def_div, subtree =
       match arg.expansion with
       | None ->
@@ -1712,55 +1695,67 @@ struct
             end
           | e -> e
         in
-        Tree.enter ~kind:(`Arg) link_name;
-        let (doc, toc, subpages) = module_expansion ?theme_uri expansion in
-        let header_docs = Top_level_markup.render_toc toc in
-        let subtree = Tree.make ~header_docs ?theme_uri doc subpages in
-        Tree.leave ();
+        (* Tree.enter ~kind:(`Arg) link_name; *)
+        let url =
+          Url.from_identifier_exn ~stop_before:false
+            (arg.id :> Paths.Identifier.t)
+        in
+        let link = resolved url [inline @@ Text name] in
+        let items, toc, subpages = module_expansion expansion in
+        let toc = Top_level_markup.render_toc toc in
+        let page = {Page.
+          toc ; items ; subpages ; title = name ; header = [] ; url ;
+        } in
+        (* Tree.leave (); *)
         (
-          O.a ~a:[ a_href ~kind:`Arg link_name ] [O.txt name] ++
+          link ++
           O.txt Syntax.Type.annotation_separator ++
           mty (arg.id :> Paths.Identifier.Signature.t) arg.expr
-        ), [subtree]
+        ), [page]
     in
-    let region = [O.code def_div] in
+    let region = O.codeblock def_div in
     region, subtree
 
-  and module_expansion
-    : ?theme_uri:Tree.uri -> Odoc_model.Lang.Module.expansion
-    -> Html_types.div_content_fun O.elt list * toc * Tree.t list
-  = fun ?theme_uri t ->
+and module_expansion
+  : Odoc_model.Lang.Module.expansion
+    -> Item.t list * toc * Page.t list
+  = fun t ->
     match t with
     | AlreadyASig -> assert false
     | Signature sg ->
-      let expansion, toc, subpages = signature ?theme_uri sg in
+      let expansion, toc, subpages = signature sg in
       expansion, toc, subpages
     | Functor (args, sg) ->
-      let sig_html, toc, subpages = signature ?theme_uri sg in
+      let sig_ir, toc, subpages = signature sg in
       let params, params_subpages =
         List.fold_left (fun (args, subpages as acc) arg ->
           match arg with
           | Odoc_model.Lang.FunctorParameter.Unit -> acc
           | Named arg ->
-            let arg, arg_subpages = functor_argument ?theme_uri arg in
-            let arg = O.li arg in
-            (args ++ [arg], subpages ++ arg_subpages)
+            let arg, arg_subpages = functor_argument arg in
+            (args @ [arg], subpages @ arg_subpages)
         )
-        ([], []) args
+          ([], []) args
       in
-      let html =
-        O.h3 ~a:[ O.a_class ["heading"] ] [ O.txt "Parameters" ] ++
-        O.ul (List.map O.Unsafe.coerce_elt params) ++
-        O.h3 ~a:[ O.a_class ["heading"] ] [ O.txt "Signature" ] ++
-        sig_html
+      let prelude =
+        Item.Text { anchor = None ; attr = [] ; content = [
+          block (Heading {
+            label = "heading" ; level = 3 ; title = [inline @@ Text "Parameters"];
+          });
+          block (List (Unordered, params));
+          block (Heading {
+            label = "heading" ; level = 3 ; title = [inline @@ Text "Signature"];
+          });
+        ]}
       in
-      html, toc, params_subpages ++ subpages
+      let content = prelude :: sig_ir in
+      content, toc, params_subpages @ subpages
 
   and module_
-      : ?theme_uri:Tree.uri -> Odoc_model.Lang.Signature.recursive ->
+      : Odoc_model.Lang.Signature.recursive ->
         Odoc_model.Lang.Module.t ->
-          rendered_item * Odoc_model.Comment.docs * toc * Tree.t list
-      = fun ?theme_uri recursive t ->
+        _ * Odoc_model.Comment.docs * toc * Page.t list
+      = fun recursive t ->
     let modname = Paths.Identifier.name t.id in
     let md =
       module_decl (t.id :> Paths.Identifier.Signature.t)
@@ -1782,30 +1777,33 @@ struct
             end
           | e -> e
         in
-        Tree.enter ~kind:(`Mod) modname;
-        let doc = Comment.to_html t.doc in
-        let expansion, toc, subpages = module_expansion ?theme_uri expansion in
-        let header_docs =
-          match toc with
-          | [] -> doc
-          | _ -> doc ++ (Top_level_markup.render_toc toc)
+        (* Tree.enter ~kind:(`Mod) modname; *)
+        let doc = Comment.to_ir t.doc in
+        let items, toc, subpages = module_expansion expansion in
+        let toc = Top_level_markup.render_toc toc in
+        let url =
+          Url.from_identifier_exn ~stop_before:false
+            (t.id :> Paths.Identifier.t)
         in
-        let subtree = Tree.make ~header_docs ?theme_uri expansion subpages in
-        Tree.leave ();
-        O.a ~a:[ a_href ~kind:`Mod modname ] [O.txt modname], [subtree]
+        let link = resolved url [inline @@ Text modname] in
+        let page = {Page.
+          toc ; items ; subpages ; title = modname ; header = doc ; url ;
+        } in
+        (* Tree.leave (); *)
+        link, [page]
     in
     let md_def_content =
       let keyword' =
         match recursive with
-        | Ordinary | Nonrec -> [keyword "module"]
-        | Rec -> [keyword "module"; O.txt " "; keyword "rec"]
-        | And -> [keyword "and"]
+        | Ordinary | Nonrec -> keyword "module"
+        | Rec -> keyword "module" ++ O.txt " " ++ keyword "rec"
+        | And -> keyword "and"
       in
 
       keyword' ++ O.txt " " ++ modname ++ md ++
-      (if Syntax.Mod.close_tag_semicolon then [O.txt ";"] else []) in
-    let region = [O.code md_def_content] in
-    region, t.doc, [], subtree
+      (if Syntax.Mod.close_tag_semicolon then O.txt ";" else O.noop) in
+    let region = O.codeblock md_def_content in
+    `Decl region, t.doc, [], subtree
 
   and module_decl (base : Paths.Identifier.Signature.t) md =
     begin match md with
@@ -1830,14 +1828,14 @@ struct
     : Paths.Identifier.Signature.t -> Odoc_model.Lang.Module.decl -> text =
     fun base -> function
     | Alias mod_path ->
-      Tree.Relative_link.of_path ~stop_before:true (mod_path :> Paths.Path.t)
+      Link.from_path ~stop_before:true (mod_path :> Paths.Path.t)
     | ModuleType mt -> mty (extract_path_from_mt ~default:base mt) mt
 
-  and module_type ?theme_uri (t : Odoc_model.Lang.ModuleType.t) =
+  and module_type (t : Odoc_model.Lang.ModuleType.t) =
     let modname = Paths.Identifier.name t.id in
     let mty =
       match t.expr with
-      | None -> []
+      | None -> O.noop
       | Some expr ->
         O.txt " = " ++ mty (t.id :> Paths.Identifier.Signature.t) expr
     in
@@ -1854,17 +1852,20 @@ struct
             end
           | e -> e
         in
-        Tree.enter ~kind:(`Mty) modname;
-        let doc = Comment.to_html t.doc in
-        let expansion, toc, subpages = module_expansion ?theme_uri expansion in
-        let header_docs =
-          match toc with
-          | [] -> doc
-          | _ -> doc ++ (Top_level_markup.render_toc toc)
+        (* Tree.enter ~kind:(`Mty) modname; *)
+        let doc = Comment.to_ir t.doc in
+        let items, toc, subpages = module_expansion expansion in
+        let toc = Top_level_markup.render_toc toc in
+        let url =
+          Url.from_identifier_exn ~stop_before:false
+            (t.id :> Paths.Identifier.t)
         in
-        let subtree = Tree.make ~header_docs ?theme_uri expansion subpages in
-        Tree.leave ();
-        O.a ~a:[ a_href ~kind:`Mty modname ] [O.txt modname], [subtree]
+        let link = resolved url [inline @@ Text modname] in
+        let page = {Page.
+          toc ; items ; subpages ; title = modname ; header = doc ; url ;
+        } in
+        (* Tree.leave (); *)
+        link, [page]
     in
     let mty_def =
       (
@@ -1874,42 +1875,38 @@ struct
         O.txt " " ++
         modname ++
         mty
-        ++ (if Syntax.Mod.close_tag_semicolon then [O.txt ";"] else [])
+        ++ (if Syntax.Mod.close_tag_semicolon then O.txt ";" else O.noop)
       )
     in
-    let region = [O.code mty_def] in
-    region, t.doc, [], subtree
+    let region = O.codeblock mty_def in
+    `Decl region, t.doc, [], subtree
 
   and mty
     : Paths.Identifier.Signature.t -> Odoc_model.Lang.ModuleType.expr -> text
   = fun base -> function
     | Path mty_path ->
-      Tree.Relative_link.of_path ~stop_before:true (mty_path :> Paths.Path.t)
+      Link.from_path ~stop_before:true (mty_path :> Paths.Path.t)
     | Signature _ ->
-      [
-        Syntax.Mod.open_tag;
-        O.txt " ... ";
-        Syntax.Mod.close_tag;
-      ]
+      Syntax.Mod.open_tag ++ O.txt " ... " ++ Syntax.Mod.close_tag
     | Functor (Unit, expr) ->
-      (if Syntax.Mod.functor_keyword then [keyword "functor"] else []) ++
+      (if Syntax.Mod.functor_keyword then keyword "functor" else O.noop) ++
       O.txt " () " ++
       mty base expr
     | Functor (Named arg, expr) ->
       let name =
         let open Odoc_model.Lang.FunctorParameter in
-        let to_print = O.txt @@ Paths.Identifier.name arg.id in
+        let name = Paths.Identifier.name arg.id in
         match
-          Tree.Relative_link.Id.href
+          Url.from_identifier
             ~stop_before:(arg.expansion = None) (arg.id :> Paths.Identifier.t)
         with
-        | exception _ -> to_print
-        | href -> O.a ~a:[ O.a_href href ] [ to_print ]
+        | Error _ -> O.txt name
+        | Ok href -> resolved href [inline @@ Text name]
       in
-      (if Syntax.Mod.functor_keyword then [keyword "functor"] else []) ++
+      (if Syntax.Mod.functor_keyword then keyword "functor" else O.noop) ++
       O.txt " (" ++ name ++ O.txt Syntax.Type.annotation_separator ++
       mty base arg.expr ++
-      [O.txt ")"; O.txt " "] ++ Syntax.Type.arrow ++ O.txt " " ++
+      O.txt ")" ++ O.txt " " ++ Syntax.Type.arrow ++ O.txt " " ++
       mty base expr
     | With (expr, substitutions) ->
       mty base expr ++
@@ -1917,7 +1914,7 @@ struct
       keyword "with" ++
       O.txt " " ++
       O.list
-        ~sep:[O.txt " "; keyword "and"; O.txt " "]
+        ~sep:(O.txt " " ++ keyword "and" ++ O.txt " ")
         ~f:(substitution base)
         substitutions
     | TypeOf md ->
@@ -1936,33 +1933,33 @@ struct
     | ModuleEq (frag_mod, md) ->
       keyword "module" ++
       O.txt " " ++
-      Tree.Relative_link.of_fragment ~base (frag_mod :> Paths.Fragment.t)
+      Link.from_fragment ~base (frag_mod :> Paths.Fragment.t)
       ++ O.txt " = " ++
       module_decl' base md
     | TypeEq (frag_typ, td) ->
       keyword "type" ++
       O.txt " " ++
       (Syntax.Type.handle_substitution_params
-        (Tree.Relative_link.of_fragment
+        (Link.from_fragment
           ~base (frag_typ :> Paths.Fragment.t))
-        [format_params td.Lang.TypeDecl.Equation.params]
+        (format_params td.Lang.TypeDecl.Equation.params)
       ) ++
       fst (format_manifest td) ++
       format_constraints td.Odoc_model.Lang.TypeDecl.Equation.constraints
     | ModuleSubst (frag_mod, mod_path) ->
       keyword "module" ++
       O.txt " " ++
-      Tree.Relative_link.of_fragment
+      Link.from_fragment
         ~base (frag_mod :> Paths.Fragment.t) ++
       O.txt " := " ++
-      Tree.Relative_link.of_path ~stop_before:true (mod_path :> Paths.Path.t)
+      Link.from_path ~stop_before:true (mod_path :> Paths.Path.t)
     | TypeSubst (frag_typ, td) ->
       keyword "type" ++
       O.txt " " ++
       (Syntax.Type.handle_substitution_params
-        (Tree.Relative_link.of_fragment
+        (Link.from_fragment
           ~base (frag_typ :> Paths.Fragment.t))
-        [format_params td.Lang.TypeDecl.Equation.params]
+        (format_params td.Lang.TypeDecl.Equation.params)
       ) ++
       O.txt " := " ++
       match td.Lang.TypeDecl.Equation.manifest with
@@ -1970,61 +1967,48 @@ struct
       | Some te ->
         type_expr te
 
-  and include_ heading_level_shift ?theme_uri (t : Odoc_model.Lang.Include.t) =
-    let docs = Comment.to_html t.doc in
-    let docs = (docs :> (Html_types.div_content O.elt) list) in
-    let should_be_inlined =
-      let is_inline_tag element =
-        element.Odoc_model.Location_.value = `Tag `Inline in
-      List.exists is_inline_tag t.doc
-    in
-    let included_html, toc, tree =
-      let heading_level_shift =
-        if should_be_inlined then
-          Some heading_level_shift
-        else
-          None
-      in
-      signature ?heading_level_shift ?theme_uri t.expansion.content
-    in
-    let should_be_open =
-      let is_open_tag element = element.Odoc_model.Location_.value = `Tag `Open in
-      let is_closed_tag element =
-        element.Odoc_model.Location_.value = `Tag `Closed in
-      if List.exists is_open_tag t.doc then
-        true
-      else
-        !Tree.open_details && not (List.exists is_closed_tag t.doc)
-    in
-    let incl, toc =
+and include_ heading_level_shift (t : Odoc_model.Lang.Include.t) =
+  let should_be_inlined =
+    let is_inline_tag element =
+      element.Odoc_model.Location_.value = `Tag `Inline in
+    List.exists is_inline_tag t.doc
+  in
+  let items, toc, tree =
+    let heading_level_shift =
       if should_be_inlined then
-        included_html, toc
+        Some heading_level_shift
       else
-        let incl =
-          O.code (
-            keyword "include" ++
-            O.txt " " ++
-            module_decl' t.parent t.decl
-            ++
-            (if Syntax.Mod.include_semicolon then [keyword ";"] else [])
-          )
-        in
-        (* FIXME: I'd like to add an anchor here, but I don't know what id to
-           give it... *)
-        [
-          O.details ~a:(if should_be_open then [O.a_open ()] else [])
-            (O.summary [O.span ~a:[O.a_class ["def"]] [incl]])
-            included_html
-        ], []
+        None
     in
-    [
-      O.div ~a:[O.a_class ["spec"; "include"]]
-        [O.div ~a:[O.a_class ["doc"]]
-          (docs ++ incl)]
-    ],
-    [],
-    toc,
-    tree
+    signature ?heading_level_shift t.expansion.content
+  in
+  let should_be_open =
+    let is_open_tag element = element.Odoc_model.Location_.value = `Tag `Open in
+    let is_closed_tag element =
+      element.Odoc_model.Location_.value = `Tag `Closed in
+    if List.exists is_open_tag t.doc then
+      true
+    else
+      not (List.exists is_closed_tag t.doc)
+  in
+  let status =
+    if should_be_inlined then `Inline
+    else if should_be_open then `Open
+    else `Closed
+  in
+  let content = 
+    O.codeblock (
+      keyword "include" ++
+        O.txt " " ++
+        module_decl' t.parent t.decl ++
+        (if Syntax.Mod.include_semicolon then keyword ";" else O.noop)
+    )
+  in
+  let nested = {Nested. items; status; content} in
+  (* XXX Improve representation of toc *)
+  let toc = if should_be_inlined then toc else [] in
+  `Nested nested, t.doc, toc, tree
+
 end
 open Module
 
@@ -2032,74 +2016,70 @@ open Module
 
 module Page :
 sig
-  val compilation_unit : ?theme_uri:Tree.uri -> Lang.Compilation_unit.t -> Tree.t
-  val page : ?theme_uri:Tree.uri -> Lang.Page.t -> Tree.t
+  val compilation_unit : Lang.Compilation_unit.t -> Page.t
+  val page : Lang.Page.t -> Page.t
 end =
 struct
   let pack
-    : Odoc_model.Lang.Compilation_unit.Packed.t ->
-        Html_types.div_content O.elt list
+    : Odoc_model.Lang.Compilation_unit.Packed.t -> Item.t list
   = fun t ->
     let open Odoc_model.Lang in
-    t
-    |> List.map begin fun x ->
+    let f x = 
       let modname = Paths.Identifier.name x.Compilation_unit.Packed.id in
       let md_def =
         keyword "module" ++
-        O.txt " " ++
-        O.txt modname ++
-        O.txt " = " ++
-        Tree.Relative_link.of_path ~stop_before:false (x.path :> Paths.Path.t)
+          O.txt " " ++
+          O.txt modname ++
+          O.txt " = " ++
+          Link.from_path ~stop_before:false (x.path :> Paths.Path.t)
       in
-      [O.code md_def]
-    end
-    |> List.flatten
-    |> fun definitions ->
-      [O.article definitions]
-
-
-
-  let compilation_unit ?theme_uri (t : Odoc_model.Lang.Compilation_unit.t) : Tree.t =
-    let package =
-      match t.id with
-      | `Root (a, _) -> a.package
-      | _ -> assert false
+      let content = O.codeblock md_def in
+      let anchor = Some ("module-" ^ modname) in
+      let attr = [] in
+      let decl = {Item. anchor ; content ; attr } in
+      Item.Declarations ([decl], None)
     in
-    Tree.enter package;
-    Tree.enter (Paths.Identifier.name t.id);
-    let header_docs = Comment.to_html t.doc in
-    let header_docs, html, subtree =
+    List.map f t
+
+  let compilation_unit (t : Odoc_model.Lang.Compilation_unit.t) : Page.t =
+    (* let package =
+     *   match t.id with
+     *   | `Root (a, _) -> a.package
+     *   | _ -> assert false
+     * in *)
+    (* Tree.enter package;
+     * Tree.enter (Paths.Identifier.name t.id); *)
+    let header = Comment.to_ir t.doc in
+    let title = Paths.Identifier.name t.id in
+    let url =
+      Url.from_identifier_exn ~stop_before:false (t.id :> Paths.Identifier.t)
+    in
+    let items, toc, subpages =
       match t.content with
       | Module sign ->
-        let html, toc, subpages = signature ?theme_uri sign in
-        let header_docs =
-          match toc with
-          | [] -> header_docs
-          | _ -> header_docs ++ (Top_level_markup.render_toc toc)
-        in
-        header_docs, html, subpages
+        let content, toc, subpages = signature sign in
+        let toc = Top_level_markup.render_toc toc in
+        content, toc, subpages
       | Pack packed ->
-        header_docs, pack packed, []
+        pack packed, [], []
     in
-    Tree.make ~header_docs ?theme_uri html subtree
+    {Page. title ; header ; items ; toc ; subpages ; url }
 
-
-
-  let page ?theme_uri (t : Odoc_model.Lang.Page.t) : Tree.t =
-    let package, name =
+  let page (t : Odoc_model.Lang.Page.t) : Page.t =
+    let _, name =
       match t.name with
       | `Page (a, name) -> a.package, name
     in
-    Tree.enter package;
-    Tree.enter ~kind:`Page (Odoc_model.Names.PageName.to_string name);
-    let html, header_docs, toc = Top_level_markup.lay_out_page t.content in
-    let html = (html :> (Html_types.div_content O.elt) list) in
-    let header_docs =
-      match toc with
-      | [] -> header_docs
-      | _ -> header_docs ++ (Top_level_markup.render_toc toc)
+    (* Tree.enter package;
+     * Tree.enter ~kind:`Page (Odoc_model.Names.PageName.to_string name); *)
+    let url =
+      Url.from_identifier_exn ~stop_before:false (t.name :> Paths.Identifier.t)
     in
-    Tree.make ~header_docs ?theme_uri html []
+    let title = Odoc_model.Names.PageName.to_string name in
+    let items, header, toc = Top_level_markup.lay_out_page t.content in
+    let toc = Top_level_markup.render_toc toc in
+    {Page. title ; header ; items ; toc ; subpages = [] ; url }
+    (* Tree.make ~header_docs ?theme_uri html [] *)
 end
 include Page
 end

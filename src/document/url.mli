@@ -32,6 +32,10 @@ val from_identifier
   : stop_before:bool
   -> Identifier.t
   -> (t, Error.t) result
+val from_identifier_exn
+  : stop_before:bool
+  -> Identifier.t
+  -> t
 
 val from_reference
   : stop_before:bool

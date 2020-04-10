@@ -377,6 +377,11 @@ let rec from_reference : stop_before:bool ->
     from_reference ~stop_before:false
       (p :> Reference.Resolved.t)
 
+let from_identifier_exn ~stop_before id =
+  match from_identifier ~stop_before id with
+  | Error e -> failwith (Error.to_string e)
+  | Ok url -> url
+
 let kind id =
   match from_identifier ~stop_before:true id with
   | Error e -> failwith (Error.to_string e)

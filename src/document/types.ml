@@ -138,5 +138,62 @@ and Block : sig
   
 end = Block
 
+and Nested : sig
+
+  type status = [ `Inline | `Open | `Closed ]
+
+  type t = {
+    content : Block.t ;
+    status : status ;
+    items : Item.t list ;
+  }
+  
+end = Nested
+
+
+and Item : sig
+
+  type 'a item = {
+    attr : Attr.t ;
+    anchor : string option ;
+    content : 'a ;
+  }
+
+  type declaration = Block.t item
+  type text = Block.t item
+  
+  type t =
+    | Text of text
+    | Declarations of declaration list * Block.t option
+    | Nested of Nested.t item * Block.t option
+    | Section of Block.t * t list
+
+end = Item
+
+and Page : sig
+
+  type t = {
+    title : string ;
+    header : Block.t ;
+    items : Item.t list ;
+    toc : Toc.t ;
+    subpages : t list ;
+    url : Url.t ;
+  }
+
+end = Page
+
+and Toc : sig
+
+  type t = one list
+  
+  and one = {
+    anchor : string ;
+    text : Inline.t ;
+    children : t ;
+  }
+
+end = Toc
+
 let inline ?(attr=[]) desc = Inline.{attr ; desc}
 let block ?(attr=[]) desc = Block.{attr ; desc}
