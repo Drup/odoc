@@ -28,81 +28,8 @@ let functor_arg_pos { Odoc_model.Lang.FunctorParameter.id ; _ } =
     (* let id = string_of_sexp @@ Identifier.sexp_of_t id in
     invalid_arg (Printf.sprintf "functor_arg_pos: %s" id) *)
 
-module O = struct
-
-  type out = Source.t
-
-  type Format.stag +=
-    | Elt of Inline.t
-
-  let make () =
-    let open Inline in
-    let out : out ref = ref [] in
-    let opened_tag : Source.decoration Stack.t = Stack.create () in
-    let push elt = out := (Stack.top_opt opened_tag, elt) :: !out in
-    let out_functions = {Format.
-      out_string = (fun s i j -> push [inline @@ Text (String.sub s i j)]);
-      out_flush = (fun () -> ());
-      out_newline = (fun () -> push [inline @@ Linebreak]);
-      out_spaces = (fun n -> push [inline @@ Text (String.make n ' ')]);
-      out_indent = (fun n -> push [inline @@ Text (String.make n ' ')])
-    }
-    and stag_functions =
-      let print_open_stag = function
-        | Elt elt -> push elt
-        | Format.String_tag s -> Stack.push s opened_tag
-        | _ -> ()
-      and print_close_stag = function
-        | Elt _ -> ()
-        | Format.String_tag _ -> ignore (Stack.pop_opt opened_tag)
-        | _ -> ()
-      in {Format.
-        mark_open_stag = (fun _ -> "");
-        mark_close_stag = (fun _ -> "");
-        print_open_stag; print_close_stag;
-      }
-    in
-    let formatter = Format.formatter_of_out_functions out_functions in
-    Format.pp_set_formatter_stag_functions formatter stag_functions;
-    (fun () -> !out), formatter
-
-  let elt ppf e = Format.pp_open_stag ppf (Elt e); Format.pp_close_stag ppf ()
-
-  let entity ppf e = elt ppf [inline @@ Inline.Entity e]
-
-  let spf fmt =
-    let flush, ppf = make () in
-    Format.kfprintf (fun _ -> flush ()) ppf fmt
-  
-  let pf = Format.fprintf
-  
-  (** Transitory hackish API *)
-      
-  let (++) f g ppf = f ppf; g ppf
-  let span f ppf = pf ppf "@[%t@]" f
-  let df = Format.dprintf
-  let txt s ppf = Format.pp_print_string ppf s
-  let noop (_ : Format.formatter) = ()
-
-  let (!) (pp : _ Fmt.t) x ppf = pp ppf x
-
-  let rec list ?sep ~f = function
-    | [] -> noop
-    | [x] -> f x
-    | x :: xs ->
-      let hd = f x in
-      let tl = list ?sep ~f xs in
-      match sep with
-      | None -> hd ++ tl
-      | Some sep -> hd ++ sep ++ tl
-
-  let render f = spf "%t" f
-  let code ?attr f =
-    [inline ?attr @@ Inline.Source (render f)]
-  let codeblock ?attr f =
-    [block ?attr @@ Block.Source (render f)]
-end
-open O
+module O = Codefmt
+open O.Infix
 
 
 let rec flatmap ?sep ~f = function
@@ -119,10 +46,7 @@ let rec flatmap ?sep ~f = function
 
 let label = function
   | Odoc_model.Lang.TypeExpr.Label s -> O.df "%s" s
-  | Optional s -> O.df "?%a%s" O.entity "#8288" s
-
-let keyword keyword =
-  O.df "@[<keyword>%s@]" keyword
+  | Optional s -> O.df "?%t%s" (O.entity "#8288") s
 
 let tag tag t = 
   O.df "@[<%s>%t@]" tag t
@@ -356,7 +280,7 @@ struct
         let param = (type_expr ~needs_parentheses:true param) in
         let args =
           if Syntax.Type.parenthesize_constructor
-          then  O.txt "(" ++ param ++ O.txt ")"
+          then O.txt "(" ++ param ++ O.txt ")"
           else param
         in
       Syntax.Type.handle_constructor_params path args
@@ -378,7 +302,7 @@ struct
     | Any  -> type_var Syntax.Type.any
     | Alias (te, alias) ->
       type_expr ~needs_parentheses:true te ++
-      O.txt " " ++ keyword "as" ++ O.txt " '" ++ O.txt alias
+      O.txt " " ++ O.keyword "as" ++ O.txt " '" ++ O.txt alias
     | Arrow (None, src, dst) ->
       let res =
         type_expr ~needs_parentheses:true src ++
@@ -421,14 +345,14 @@ struct
       O.txt (String.concat " " polyvars ^ ". ") ++ type_expr t
     | Package pkg ->
       enclose ~l:"(" ~r:")" (
-         keyword "module" ++ O.txt " " ++
+         O.keyword "module" ++ O.txt " " ++
            Link.from_path ~stop_before:false (pkg.path :> Paths.Path.t) ++
          match pkg.substitutions with
          | [] -> O.noop
          | lst ->
-           O.txt " " ++ keyword "with" ++ O.txt " " ++
+           O.txt " " ++ O.keyword "with" ++ O.txt " " ++
            O.list
-             ~sep:(O.txt " " ++ keyword "and" ++ O.txt " ")
+             ~sep:(O.txt " " ++ O.keyword "and" ++ O.txt " ")
              lst
              ~f:(package_subst pkg.path)
        )
@@ -436,7 +360,7 @@ struct
   and package_subst (pkg_path : Paths.Path.ModuleType.t)
         (frag_typ, te : Paths.Fragment.Type.t * Odoc_model.Lang.TypeExpr.t)
     : text =
-    keyword "type" ++
+    O.keyword "type" ++
     O.txt " " ++
     (match pkg_path with
     | `Resolved rp ->
@@ -485,7 +409,7 @@ struct
            *   [O.a ~a:[O.a_href ("#" ^ anchor); O.a_class ["anchor"]] []
            *   ; *)
               O.code (
-                (if mutable_ then keyword "mutable" ++ O.txt " " else O.noop)
+                (if mutable_ then O.keyword "mutable" ++ O.txt " " else O.noop)
                 ++ O.txt name
                 ++ O.txt Syntax.Type.annotation_separator
                 ++ type_expr typ
@@ -553,7 +477,7 @@ struct
                 (if is_gadt then
                     O.txt Syntax.Type.annotation_separator
                   else
-                    O.txt " " ++ keyword "of" ++ O.txt " ") ++
+                    O.txt " " ++ O.keyword "of" ++ O.txt " ") ++
                   params
             )
           ++ ret_type
@@ -565,7 +489,7 @@ struct
           @ O.code ret_type
         else
           (O.code
-              (cstr ++ O.txt " " ++ keyword "of" ++ O.txt " "))
+              (cstr ++ O.txt " " ++ O.keyword "of" ++ O.txt " "))
           @ record fields
 
 
@@ -607,7 +531,7 @@ struct
 
   let extension (t : Odoc_model.Lang.Extension.t) =
     let extension =
-      O.code (keyword "type" ++
+      O.code (O.keyword "type" ++
           O.txt " " ++
           Link.from_path ~stop_before:false (t.type_path :> Paths.Path.t) ++
           O.txt " += ")
@@ -623,7 +547,7 @@ struct
 
   let exn (t : Odoc_model.Lang.Exception.t) =
     let cstr = constructor (t.id :> Paths.Identifier.t) t.args t.res in
-    let exn = O.code ( keyword "exception" ++ O.txt " " ) @ cstr
+    let exn = O.code ( O.keyword "exception" ++ O.txt " " ) @ cstr
       @ O.code (if Syntax.Type.Exception.semicolon then O.txt ";" else O.noop)
     in
     [block (Inline exn)], t.doc
@@ -667,7 +591,7 @@ struct
                 (
                   if Syntax.Type.Variant.parenthesize_params
                   then params
-                  else O.txt " " ++ keyword "of" ++ O.txt " " ++ params
+                  else O.txt " " ++ O.keyword "of" ++ O.txt " " ++ params
                 )
             )             
           end,
@@ -745,7 +669,7 @@ struct
   let format_constraints constraints =
     O.list constraints ~f:begin fun (t1, t2) ->
       O.txt " " ++
-      keyword "constraint" ++
+      O.keyword "constraint" ++
       O.txt " " ++
       type_expr t1 ++
       O.txt " = " ++
@@ -765,7 +689,7 @@ struct
       let manifest =
         O.txt (if is_substitution then " := " else " = ") ++
         (if private_ then
-            keyword Syntax.Type.private_keyword ++ O.txt " "
+            O.keyword Syntax.Type.private_keyword ++ O.txt " "
         else O.noop) ++
         type_expr t
       in
@@ -783,7 +707,7 @@ struct
         let manifest =
           O.code (O.txt (if is_substitution then " := " else " = ") ++
           if t.equation.private_ then
-            keyword Syntax.Type.private_keyword ++ O.txt " "
+            O.keyword Syntax.Type.private_keyword ++ O.txt " "
           else
             O.noop) @
           polymorphic_variant ~type_ident:(t.id :> Paths.Identifier.t) variant
@@ -802,7 +726,7 @@ struct
         O.code (
           O.txt " = " ++
           if need_private then
-            keyword Syntax.Type.private_keyword ++ O.txt " "
+            O.keyword Syntax.Type.private_keyword ++ O.txt " "
           else
             O.noop
         ) @
@@ -814,9 +738,9 @@ struct
     let tdecl_def =
       let keyword' =
         match recursive with
-        | Ordinary | Rec -> keyword "type"
-        | And -> keyword "and"
-        | Nonrec -> keyword "type" ++ O.txt " " ++ keyword "nonrec"
+        | Ordinary | Rec -> O.keyword "type"
+        | And -> O.keyword "and"
+        | Nonrec -> O.keyword "type" ++ O.txt " " ++ O.keyword "nonrec"
       in
       O.code (
           keyword' ++ O.txt " "
@@ -842,7 +766,7 @@ struct
   let value (t : Odoc_model.Lang.Value.t) =
     let name = Paths.Identifier.name t.id in
     let value =
-      keyword Syntax.Value.variable_keyword ++
+      O.keyword Syntax.Value.variable_keyword ++
       O.txt " " ++
       O.txt name ++
       O.txt Syntax.Type.annotation_separator ++
@@ -854,7 +778,7 @@ struct
   let external_ (t : Odoc_model.Lang.External.t) =
     let name = Paths.Identifier.name t.id in
     let external_ =
-      keyword Syntax.Value.variable_keyword ++
+      O.keyword Syntax.Value.variable_keyword ++
       O.txt " " ++
       O.txt name ++
       O.txt Syntax.Type.annotation_separator ++
@@ -874,7 +798,7 @@ struct
     let name = Paths.Identifier.name t.id in
     let path = Link.from_path ~stop_before:true (t.manifest :> Paths.Path.t) in
     let value =
-      keyword "module" ++
+      O.keyword "module" ++
       O.txt " " ++
       O.txt name ++
       O.txt " := " ++
@@ -1403,7 +1327,7 @@ struct
     | Inherit (Signature _) -> assert false (* Bold. *)
     | Inherit class_type_expression ->
       O.code (
-        keyword "inherit" ++
+        O.keyword "inherit" ++
         O.txt " " ++
         class_type_expr class_type_expression),
       []
@@ -1426,11 +1350,11 @@ struct
   and method_ (t : Odoc_model.Lang.Method.t) =
     let name = Paths.Identifier.name t.id in
     let virtual_ =
-      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
+      if t.virtual_ then O.keyword "virtual" ++ O.txt " " else O.noop in
     let private_ =
-      if t.private_ then keyword "private" ++ O.txt " " else O.noop in
+      if t.private_ then O.keyword "private" ++ O.txt " " else O.noop in
     let method_ =
-      keyword "method" ++
+      O.keyword "method" ++
       O.txt " " ++
       private_ ++
       virtual_ ++
@@ -1443,11 +1367,11 @@ struct
   and instance_variable (t : Odoc_model.Lang.InstanceVariable.t) =
     let name = Paths.Identifier.name t.id in
     let virtual_ =
-      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
+      if t.virtual_ then O.keyword "virtual" ++ O.txt " " else O.noop in
     let mutable_ =
-      if t.mutable_ then keyword "mutable" ++ O.txt " " else O.noop in
+      if t.mutable_ then O.keyword "mutable" ++ O.txt " " else O.noop in
     let val_ =
-      keyword "val" ++
+      O.keyword "val" ++
       O.txt " " ++
       mutable_ ++
       virtual_ ++
@@ -1483,7 +1407,7 @@ struct
     let name = Paths.Identifier.name t.id in
     let params = format_params ~delim:(`brackets) t.params in
     let virtual_ =
-      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
+      if t.virtual_ then O.keyword "virtual" ++ O.txt " " else O.noop in
     let cd = class_decl t.type_ in
     let cname, subtree =
       match t.expansion with
@@ -1516,7 +1440,7 @@ struct
         | Ordinary | Nonrec | Rec -> "class"
         | And -> "and"
       in
-      keyword keyword' ++
+      O.keyword keyword' ++
         O.txt " " ++
         virtual_ ++
         params ++
@@ -1533,7 +1457,7 @@ struct
     let name = Paths.Identifier.name t.id in
     let params = format_params ~delim:(`brackets) t.params in
     let virtual_ =
-      if t.virtual_ then keyword "virtual" ++ O.txt " " else O.noop in
+      if t.virtual_ then O.keyword "virtual" ++ O.txt " " else O.noop in
     let expr = class_type_expr t.expr in
     let cname, subtree =
       match t.expansion with
@@ -1564,8 +1488,8 @@ struct
       let keyword' =
         match recursive with
         | Ordinary | Nonrec | Rec ->
-          keyword "class" ++ O.txt " " ++ keyword "type"
-        | And -> keyword "and"
+          O.keyword "class" ++ O.txt " " ++ O.keyword "type"
+        | And -> O.keyword "and"
       in
       keyword' ++
       O.txt " " ++
@@ -1795,9 +1719,9 @@ and module_expansion
     let md_def_content =
       let keyword' =
         match recursive with
-        | Ordinary | Nonrec -> keyword "module"
-        | Rec -> keyword "module" ++ O.txt " " ++ keyword "rec"
-        | And -> keyword "and"
+        | Ordinary | Nonrec -> O.keyword "module"
+        | Rec -> O.keyword "module" ++ O.txt " " ++ O.keyword "rec"
+        | And -> O.keyword "and"
       in
 
       keyword' ++ O.txt " " ++ modname ++ md ++
@@ -1869,9 +1793,9 @@ and module_expansion
     in
     let mty_def =
       (
-        keyword "module" ++
+        O.keyword "module" ++
         O.txt " " ++
-        keyword "type" ++
+        O.keyword "type" ++
         O.txt " " ++
         modname ++
         mty
@@ -1889,7 +1813,7 @@ and module_expansion
     | Signature _ ->
       Syntax.Mod.open_tag ++ O.txt " ... " ++ Syntax.Mod.close_tag
     | Functor (Unit, expr) ->
-      (if Syntax.Mod.functor_keyword then keyword "functor" else O.noop) ++
+      (if Syntax.Mod.functor_keyword then O.keyword "functor" else O.noop) ++
       O.txt " () " ++
       mty base expr
     | Functor (Named arg, expr) ->
@@ -1903,7 +1827,7 @@ and module_expansion
         | Error _ -> O.txt name
         | Ok href -> resolved href [inline @@ Text name]
       in
-      (if Syntax.Mod.functor_keyword then keyword "functor" else O.noop) ++
+      (if Syntax.Mod.functor_keyword then O.keyword "functor" else O.noop) ++
       O.txt " (" ++ name ++ O.txt Syntax.Type.annotation_separator ++
       mty base arg.expr ++
       O.txt ")" ++ O.txt " " ++ Syntax.Type.arrow ++ O.txt " " ++
@@ -1911,18 +1835,18 @@ and module_expansion
     | With (expr, substitutions) ->
       mty base expr ++
       O.txt " " ++
-      keyword "with" ++
+      O.keyword "with" ++
       O.txt " " ++
       O.list
-        ~sep:(O.txt " " ++ keyword "and" ++ O.txt " ")
+        ~sep:(O.txt " " ++ O.keyword "and" ++ O.txt " ")
         ~f:(substitution base)
         substitutions
     | TypeOf md ->
-      keyword "module" ++
+      O.keyword "module" ++
       O.txt " " ++
-      keyword "type" ++
+      O.keyword "type" ++
       O.txt " " ++
-      keyword "of" ++
+      O.keyword "of" ++
       O.txt " " ++
       module_decl' base md
 
@@ -1931,13 +1855,13 @@ and module_expansion
     -> text
   = fun base -> function
     | ModuleEq (frag_mod, md) ->
-      keyword "module" ++
+      O.keyword "module" ++
       O.txt " " ++
       Link.from_fragment ~base (frag_mod :> Paths.Fragment.t)
       ++ O.txt " = " ++
       module_decl' base md
     | TypeEq (frag_typ, td) ->
-      keyword "type" ++
+      O.keyword "type" ++
       O.txt " " ++
       (Syntax.Type.handle_substitution_params
         (Link.from_fragment
@@ -1947,14 +1871,14 @@ and module_expansion
       fst (format_manifest td) ++
       format_constraints td.Odoc_model.Lang.TypeDecl.Equation.constraints
     | ModuleSubst (frag_mod, mod_path) ->
-      keyword "module" ++
+      O.keyword "module" ++
       O.txt " " ++
       Link.from_fragment
         ~base (frag_mod :> Paths.Fragment.t) ++
       O.txt " := " ++
       Link.from_path ~stop_before:true (mod_path :> Paths.Path.t)
     | TypeSubst (frag_typ, td) ->
-      keyword "type" ++
+      O.keyword "type" ++
       O.txt " " ++
       (Syntax.Type.handle_substitution_params
         (Link.from_fragment
@@ -1998,10 +1922,10 @@ and include_ heading_level_shift (t : Odoc_model.Lang.Include.t) =
   in
   let content = 
     O.codeblock (
-      keyword "include" ++
+      O.keyword "include" ++
         O.txt " " ++
         module_decl' t.parent t.decl ++
-        (if Syntax.Mod.include_semicolon then keyword ";" else O.noop)
+        (if Syntax.Mod.include_semicolon then O.keyword ";" else O.noop)
     )
   in
   let nested = {Nested. items; status; content} in
@@ -2027,7 +1951,7 @@ struct
     let f x = 
       let modname = Paths.Identifier.name x.Compilation_unit.Packed.id in
       let md_def =
-        keyword "module" ++
+        O.keyword "module" ++
           O.txt " " ++
           O.txt modname ++
           O.txt " = " ++
