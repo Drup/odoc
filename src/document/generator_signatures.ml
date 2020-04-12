@@ -3,7 +3,7 @@ module Lang = Odoc_model.Lang
 
 
 
-type rendered_item = Block.t
+type rendered_item = DocumentedSrc.t
 
 type text = Format.formatter -> unit
 

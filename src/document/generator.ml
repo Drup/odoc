@@ -396,14 +396,14 @@ sig
 
   val format_constraints : (Lang.TypeExpr.t * Lang.TypeExpr.t) list -> text
 end =
-struct
+struct 
   let record fields =
     let field mutable_ id typ =
       match Url.from_identifier ~stop_before:true id with
       | Error e -> failwith (Url.Error.to_string e)
       | Ok { anchor; kind; _ } ->
         let name = Paths.Identifier.name id in
-        let attrs = [Attr.Class "def"; Attr.Class kind] in
+        let attrs = ["def"; "record"; kind] in
         let cell =
           (* O.td ~a:[ O.a_class ["def"; kind ] ]
            *   [O.a ~a:[O.a_href ("#" ^ anchor); O.a_class ["anchor"]] []
@@ -427,19 +427,21 @@ struct
         in 
         let rhs = Comment.to_ir fld.doc in
         let doc = if not (Comment.has_doc fld.doc) then [] else rhs in
-        DocumentedSrc.{ anchor; attrs; code; doc }
+        DocumentedSrc.Documented { anchor; attrs; code; doc }
       )
     in
-    let attr = [Attr.Class "record"] in
-    O.code (O.txt "{") @
-      [inline ~attr @@ DocumentedSrc rows] @
-      O.code (O.txt "}")        
-
+    let content = 
+      O.documentedSrc (O.txt "{")
+      @ rows
+      @ O.documentedSrc (O.txt "}")
+    in
+    content
+  
 
   let constructor
     : Paths.Identifier.t -> Odoc_model.Lang.TypeDecl.Constructor.argument
       -> Odoc_model.Lang.TypeExpr.t option
-      -> Inline.t
+      -> DocumentedSrc.t
     = fun id args ret_type ->
       let name = Paths.Identifier.name id in
       let kind = Url.kind id in
@@ -462,16 +464,14 @@ struct
           true, ret_type
       in
       match args with
-      | Tuple [] -> O.code (cstr ++ ret_type)
+      | Tuple [] -> O.documentedSrc (cstr ++ ret_type)
       | Tuple lst ->
         let params = O.list lst
             ~sep:(O.txt Syntax.Type.Tuple.element_separator)
             ~f:(type_expr ~needs_parentheses:is_gadt)
         in
-        O.code (
-          cstr ++
-            (
-              if Syntax.Type.Variant.parenthesize_params
+        O.documentedSrc (cstr ++
+            (if Syntax.Type.Variant.parenthesize_params
               then O.txt "(" ++ params ++ O.txt ")"
               else
                 (if is_gadt then
@@ -480,34 +480,32 @@ struct
                     O.txt " " ++ O.keyword "of" ++ O.txt " ") ++
                   params
             )
-          ++ ret_type
-        )
+          ++ ret_type)
       | Record fields ->
         if is_gadt then
-          (O.code (cstr ++ O.txt Syntax.Type.annotation_separator))
+          O.documentedSrc (cstr ++ O.txt Syntax.Type.annotation_separator)
           @ record fields
-          @ O.code ret_type
+          @ O.documentedSrc ret_type
         else
-          (O.code
-              (cstr ++ O.txt " " ++ O.keyword "of" ++ O.txt " "))
+          O.documentedSrc (cstr ++ O.txt " " ++ O.keyword "of" ++ O.txt " ")
           @ record fields
 
 
 
-  let variant cstrs : Inline.t =
+  let variant cstrs : DocumentedSrc.t =
     let constructor id args res =
       match Url.from_identifier ~stop_before:true id with
       | Error e -> failwith (Url.Error.to_string e)
       | Ok { anchor; kind; _ } ->
-        let attrs = [Attr.Class "def" ; Attr.Class kind] in
-        let cell =
-          O.code (O.txt "| ") @
-            constructor id args res
+        let attrs = ["def" ; "variant" ; kind] in
+        let content =
+          let doc = constructor id args res in
+          O.documentedSrc (O.txt "| ") @ doc
         in
-        anchor, attrs, cell
+        anchor, attrs, content
     in
     match cstrs with
-    | [] -> O.code (O.txt "|")
+    | [] -> O.documentedSrc (O.txt "|")
     | _ :: _ ->
       let rows =
         cstrs |> List.map (fun cstr ->
@@ -517,46 +515,49 @@ struct
           in
           let rhs = Comment.to_ir cstr.doc in
           let doc = if not (Comment.has_doc cstr.doc) then [] else rhs in
-          DocumentedSrc.{ anchor; attrs; code; doc }
+          DocumentedSrc.Nested { anchor; attrs; code; doc }
         )
       in
-      let attr = [Attr.Class "variant"] in
-      [inline ~attr @@ DocumentedSrc rows]
+      rows
  
 
 
   let extension_constructor (t : Odoc_model.Lang.Extension.Constructor.t) =
     (* TODO doc *)
-    constructor (t.id :> Paths.Identifier.t) t.args t.res
+    let doc = constructor (t.id :> Paths.Identifier.t) t.args t.res in
+    O.documentedSrc (O.txt "| ") @ doc
 
   let extension (t : Odoc_model.Lang.Extension.t) =
     let extension =
-      O.code (O.keyword "type" ++
+      O.documentedSrc (O.keyword "type" ++
           O.txt " " ++
           Link.from_path ~stop_before:false (t.type_path :> Paths.Path.t) ++
           O.txt " += ")
       @ 
-        flatmap t.constructors ~sep:[inline @@ Text " | "]
+        flatmap t.constructors
           ~f:extension_constructor
       @ 
-        O.code (if Syntax.Type.type_def_semicolon then O.txt ";" else O.noop)
+        O.documentedSrc
+          (if Syntax.Type.type_def_semicolon then O.txt ";" else O.noop)
     in 
-    [block (Inline extension)], t.doc
+    extension, t.doc
 
 
 
   let exn (t : Odoc_model.Lang.Exception.t) =
     let cstr = constructor (t.id :> Paths.Identifier.t) t.args t.res in
-    let exn = O.code ( O.keyword "exception" ++ O.txt " " ) @ cstr
-      @ O.code (if Syntax.Type.Exception.semicolon then O.txt ";" else O.noop)
+    let exn =
+      O.documentedSrc (O.keyword "exception" ++ O.txt " ")
+      @ cstr
+      @ O.documentedSrc
+          (if Syntax.Type.Exception.semicolon then O.txt ";" else O.noop)
     in
-    [block (Inline exn)], t.doc
+    exn, t.doc
 
 
 
   let polymorphic_variant
       ~type_ident (t : Odoc_model.Lang.TypeExpr.Polymorphic_variant.t) =
-
     let row item =
       let kind_approx, cstr, doc =
         match item with
@@ -605,7 +606,7 @@ struct
         let { Url.Anchor. name = anchor; kind } =
           Url.Anchor.Polymorphic_variant_decl.from_element ~type_ident item
         in
-        let attrs = [Attr.Class "def"; Attr.Class kind] in
+        let attrs = ["def"; kind] in
         let code =
           O.code (O.txt "| ") @ cstr
         in
@@ -613,32 +614,32 @@ struct
           | None -> []
           | Some doc -> doc
         in
-        DocumentedSrc.{ attrs ; anchor ; code ; doc }
+        DocumentedSrc.Documented { attrs ; anchor ; code ; doc }
       with Failure s ->
         Printf.eprintf "ERROR: %s\n%!" s;
         let code = O.code (O.txt "| " ) @ cstr in
-        let attrs = [Attr.Class "def"; Attr.Class kind_approx] in
+        let attrs = ["def"; kind_approx] in
         let doc = [] in
         let anchor = "" in
-        DocumentedSrc.{ attrs ; anchor ; code ; doc }
+        DocumentedSrc.Documented { attrs ; anchor ; code ; doc }
     in
-    let variants = 
-      let attr = [Attr.Class "variant"] in
-      [inline ~attr @@ DocumentedSrc (List.map row t.elements)]
-    in
-    match t.kind with
+    let variants = List.map row t.elements in
+    let intro, ending = match t.kind with
     | Fixed ->
-      O.code (O.txt "[ ") @ variants @ O.code (O.txt " ]")
+      O.documentedSrc (O.txt "[ "),
+      O.documentedSrc (O.txt " ]")
     | Open ->
-      O.code (O.txt "[> ") @ variants @ O.code (O.txt " ]")
+      O.documentedSrc (O.txt "[> "),
+      O.documentedSrc (O.txt " ]")
     | Closed [] ->
-      O.code (O.txt "[< ") @ variants @ O.code (O.txt " ]")
+      O.documentedSrc (O.txt "[< "),
+      O.documentedSrc (O.txt " ]")
     | Closed lst ->
       let constrs = String.concat " " lst in
-      O.code (O.txt "[< ")
-      @ variants
-      @ O.code (O.txt (" " ^ constrs ^ " ]"))
- 
+      O.documentedSrc (O.txt "[< "),
+      O.documentedSrc (O.txt (" " ^ constrs ^ " ]"))
+    in
+    intro @ variants @ ending
 
   let format_params
     : 'row. ?delim:[`parens | `brackets] -> Odoc_model.Lang.TypeDecl.param list
@@ -701,39 +702,44 @@ struct
     let tyname = Paths.Identifier.name t.id in
     let params = format_params t.equation.params in
     let constraints = format_constraints t.equation.constraints in
-    let manifest, need_private =
+    let manifest, need_private = 
       match t.equation.manifest with
       | Some (Odoc_model.Lang.TypeExpr.Polymorphic_variant variant) ->
-        let manifest =
-          O.code (O.txt (if is_substitution then " := " else " = ") ++
-          if t.equation.private_ then
-            O.keyword Syntax.Type.private_keyword ++ O.txt " "
-          else
-            O.noop) @
+        let code =
           polymorphic_variant ~type_ident:(t.id :> Paths.Identifier.t) variant
+        in
+        let manifest =
+          O.documentedSrc (O.txt (if is_substitution then " := " else " = ") ++
+            if t.equation.private_ then
+              O.keyword Syntax.Type.private_keyword ++ O.txt " "
+            else
+              O.noop)
+          @ [DocumentedSrc.Nested
+              { attrs = ["manifest"] ; anchor = "" ; code ; doc = [] }]
         in
         manifest, false
       | _ ->
         let manifest, need_private =
           format_manifest ~is_substitution t.equation
         in
-        O.code manifest, need_private
+        O.documentedSrc manifest, need_private
     in
     let representation = 
       match t.representation with
       | None -> []
       | Some repr ->
-        O.code (
+        let content = match repr with
+          | Extensible -> O.documentedSrc (O.txt "..")
+          | Variant cstrs -> variant cstrs
+          | Record fields -> record fields
+        in 
+        O.documentedSrc (
           O.txt " = " ++
           if need_private then
             O.keyword Syntax.Type.private_keyword ++ O.txt " "
           else
             O.noop
-        ) @
-        match repr with
-        | Extensible -> O.code (O.txt "..") 
-        | Variant cstrs -> variant cstrs
-        | Record fields -> record fields
+        ) @ content
     in
     let tdecl_def =
       let keyword' =
@@ -742,16 +748,17 @@ struct
         | And -> O.keyword "and"
         | Nonrec -> O.keyword "type" ++ O.txt " " ++ O.keyword "nonrec"
       in
-      O.code (
+      O.documentedSrc (
           keyword' ++ O.txt " "
           ++ (Syntax.Type.handle_constructor_params (O.txt tyname) params)
         )
       @ manifest
       @ representation
-      @ O.code constraints
-      @ O.code (if Syntax.Type.type_def_semicolon then O.txt ";" else O.noop)
+      @ O.documentedSrc constraints
+      @ O.documentedSrc
+          (if Syntax.Type.type_def_semicolon then O.txt ";" else O.noop)
     in
-    [block (Block.Paragraph tdecl_def)], t.doc
+    tdecl_def, t.doc
 end
 open Type_declaration
 
@@ -773,7 +780,7 @@ struct
       type_expr t.type_
       ++ (if Syntax.Value.semicolon then O.txt ";" else O.noop)
     in
-    O.codeblock value, t.doc
+    O.documentedSrc value, t.doc
 
   let external_ (t : Odoc_model.Lang.External.t) =
     let name = Paths.Identifier.name t.id in
@@ -785,7 +792,7 @@ struct
       type_expr t.type_
       ++ (if Syntax.Type.External.semicolon then O.txt ";" else O.noop)
     in
-    O.codeblock external_, t.doc
+    O.documentedSrc external_, t.doc
 end
 open Value
 
@@ -804,7 +811,7 @@ struct
       O.txt " := " ++
       path
     in
-    O.codeblock value, t.doc
+    O.documentedSrc value, t.doc
 end
 open ModuleSubstitution
 
@@ -869,7 +876,7 @@ struct
 (* Adds spec class to the list of existing item attributes. *)
   let mk_class item_to_spec item =
     match item_to_spec item with
-    | Some spec -> [Attr.Class ("spec " ^ spec)]
+    | Some spec -> ["spec " ^ spec]
     | None -> []
 
 
@@ -1319,14 +1326,14 @@ struct
     | Inherit _ -> `Leaf_item (`Inherit, item)
     | Comment comment -> `Comment comment
  
-  let rec render_class_signature_item : Lang.ClassSignature.item -> Inline.t * _ =
+  let rec render_class_signature_item : Lang.ClassSignature.item -> DocumentedSrc.t * _ =
     function
     | Method m -> method_ m
     | InstanceVariable v -> instance_variable v
-    | Constraint (t1, t2) -> O.code (format_constraints [(t1, t2)]), []
+    | Constraint (t1, t2) -> O.documentedSrc (format_constraints [(t1, t2)]), []
     | Inherit (Signature _) -> assert false (* Bold. *)
     | Inherit class_type_expression ->
-      O.code (
+      O.documentedSrc (
         O.keyword "inherit" ++
         O.txt " " ++
         class_type_expr class_type_expression),
@@ -1342,7 +1349,7 @@ struct
       ~item_to_spec:class_signature_item_to_spec
       ~render_leaf_item:(fun item ->
         let text, docs = render_class_signature_item item in
-        [block @@ Inline text] (* XXX Check *), docs
+        text (* XXX Check *), docs
       )
       ~render_nested_article:(fun _ -> assert false)
       tagged_items
@@ -1362,7 +1369,7 @@ struct
       O.txt Syntax.Type.annotation_separator ++
       type_expr t.type_
     in
-    O.code method_, t.doc
+    O.documentedSrc method_, t.doc
 
   and instance_variable (t : Odoc_model.Lang.InstanceVariable.t) =
     let name = Paths.Identifier.name t.id in
@@ -1379,7 +1386,7 @@ struct
       O.txt Syntax.Type.annotation_separator ++
       type_expr t.type_
     in
-    O.code val_, t.doc
+    O.documentedSrc val_, t.doc
 
   and class_type_expr (cte : Odoc_model.Lang.ClassType.expr) =
     match cte with
@@ -1449,8 +1456,8 @@ struct
         O.txt Syntax.Type.annotation_separator ++
         cd
     in
-    let region = O.codeblock class_def_content in
-    `Decl region, t.doc, [], subtree
+    let code = O.documentedSrc class_def_content in
+    `Decl code, t.doc, [], subtree
 
 
   and class_type recursive (t : Odoc_model.Lang.ClassType.t) =
@@ -1500,8 +1507,8 @@ struct
       O.txt " = " ++
       expr
     in
-    let region = O.codeblock ctyp in
-    `Decl region, t.doc, [], subtree
+    let code = O.documentedSrc ctyp in
+    `Decl code, t.doc, [], subtree
 end
 open Class
 
@@ -1726,7 +1733,7 @@ and module_expansion
 
       keyword' ++ O.txt " " ++ modname ++ md ++
       (if Syntax.Mod.close_tag_semicolon then O.txt ";" else O.noop) in
-    let region = O.codeblock md_def_content in
+    let region = O.documentedSrc md_def_content in
     `Decl region, t.doc, [], subtree
 
   and module_decl (base : Paths.Identifier.Signature.t) md =
@@ -1802,7 +1809,7 @@ and module_expansion
         ++ (if Syntax.Mod.close_tag_semicolon then O.txt ";" else O.noop)
       )
     in
-    let region = O.codeblock mty_def in
+    let region = O.documentedSrc mty_def in
     `Decl region, t.doc, [], subtree
 
   and mty
@@ -1957,7 +1964,7 @@ struct
           O.txt " = " ++
           Link.from_path ~stop_before:false (x.path :> Paths.Path.t)
       in
-      let content = O.codeblock md_def in
+      let content = O.documentedSrc md_def in
       let anchor = Some ("module-" ^ modname) in
       let attr = [] in
       let decl = {Item. anchor ; content ; attr } in

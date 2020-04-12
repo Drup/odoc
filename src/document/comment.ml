@@ -274,7 +274,7 @@ let tag : ?xref_base_uri:string ->
     let target =
       match kind with
       | `Url -> Inline.Link (target, [inline @@ Text target])
-      | `File -> Inline.Verbatim target
+      | `File -> Inline.Source [None, [inline @@ Text target]]
       | `Document -> Inline.Text target
     in
     description

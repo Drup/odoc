@@ -13,28 +13,25 @@ type style = [
   | `Subscript
 ]
 
-module rec Attr : sig
+module rec Class : sig
 
-  type one =
-    | Class of string
-    | Other of string * string
-  type t = one list
+  type t = string list
 
-end = Attr
+end = Class
 
-and Tabular : sig
-
-  type t = {
-    header : line option ;
-    lines : line List.t ;
-  }
-
-  and line = {
-    attr : Attr.t ;
-    desc : Block.t list ;
-  }
-        
-end = Tabular
+(* and Tabular : sig
+ * 
+ *   type t = {
+ *     header : line option ;
+ *     lines : line List.t ;
+ *   }
+ * 
+ *   and line = {
+ *     attr : Class.t ;
+ *     desc : Block.t list ;
+ *   }
+ *         
+ * end = Tabular *)
 
 and InternalLink : sig
 
@@ -61,23 +58,12 @@ and Source : sig
 
 end = Source
 
-and DocumentedSrc : sig
-
-  type t = line list
-  and line = {
-    attrs : Attr.t ;
-    anchor : string ;
-    code : Inline.t ;
-    doc : Block.t ;
-  }
-end = DocumentedSrc
-
 and Inline : sig
 
   type t = one list
 
   and one = {
-    attr : Attr.t ;
+    attr : Class.t ;
     desc : desc ;
   }
   
@@ -89,9 +75,7 @@ and Inline : sig
     | Link of href * t
     | InternalLink of InternalLink.t
     | Source of Source.t
-    | Verbatim of string
     | Raw_markup of Raw_markup.t
-    | DocumentedSrc of DocumentedSrc.t
 
 end = Inline
 
@@ -110,7 +94,7 @@ and Block : sig
   type t = one list
 
   and one = {
-    attr : Attr.t ;
+    attr : Class.t ;
     desc : desc ;
   }
   
@@ -119,24 +103,46 @@ and Block : sig
     | Paragraph of Inline.t
     | List of list_type * t list
     | Description of (Inline.t * t) list
-    (* | Math_blk of Math.t *)
     | Source of Source.t
     | Verbatim of string
-    | Tabular of Tabular.t
+    | Heading of Heading.t
+    | Raw_markup of Raw_markup.t
+    (* | DocumentedSrc of DocumentedSrc.t *)
+    (* | Math_blk of Math.t *)
+    (* | Tabular of Tabular.t *)
     (* | Table of Wrapper.t * t *)
     (* | Picture of href * string * string option * int option *)
     (* | Figure of Wrapper.t * t *)
-    | Heading of Heading.t
-    (* | Title of Level.title * Inline.seq *)
-    | Rule
-    | Raw_markup of Raw_markup.t
-    | DocumentedSrc of DocumentedSrc.t
+    (* | Rule *)
 
   and list_type =
     | Ordered
     | Unordered
   
 end = Block
+
+and DocumentedSrc : sig
+
+  type t = line list
+  and line =
+    | Code of {
+      attr : Class.t ;
+      code : Source.t ;
+    }
+    | Documented of {
+        attrs : Class.t ;
+        anchor : string ;
+        code : Inline.t ;
+        doc : Block.t ;
+      }
+    | Nested of {
+        attrs : Class.t ;
+        anchor : string ;
+        code : t ;
+        doc : Block.t ;
+      }
+
+end = DocumentedSrc
 
 and Nested : sig
 
@@ -154,12 +160,12 @@ end = Nested
 and Item : sig
 
   type 'a item = {
-    attr : Attr.t ;
+    attr : Class.t ;
     anchor : string option ;
     content : 'a ;
   }
 
-  type declaration = Block.t item
+  type declaration = DocumentedSrc.t item
   type text = Block.t item
   
   type t =
