@@ -184,7 +184,7 @@ and Page : sig
     items : Item.t list ;
     toc : Toc.t ;
     subpages : t list ;
-    url : Url.t ;
+    url : Url.Path.t ;
   }
 
 end = Page

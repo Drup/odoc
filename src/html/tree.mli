@@ -17,6 +17,7 @@
 
 
 module Html = Tyxml.Html
+module Url = Odoc_document.Url
 
 (** Supported languages for printing code parts. *)
 

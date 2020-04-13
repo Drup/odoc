@@ -17,7 +17,7 @@
 
 
 module Html = Tyxml.Html
-module DUrl = Odoc_document.Url
+module Url = Odoc_document.Url
 
 
 type syntax = OCaml | Reason
@@ -52,47 +52,26 @@ module Relative_link = struct
   let semantic_uris = ref false
 
   module Id : sig
-    exception Not_linkable
-    exception Can't_stop_before
-
     val href : xref_base_uri:string option -> Odoc_document.Url.t -> string
   end = struct    
-    exception Not_linkable
-
     let rec drop_shared_prefix l1 l2 =
       match l1, l2 with
       | l1 :: l1s, l2 :: l2s when l1 = l2 ->
         drop_shared_prefix l1s l2s
       | _, _ -> l1, l2
 
-    exception Can't_stop_before
-
-    let href ~xref_base_uri url =
-      match xref_base_uri, url with
+    let href ~xref_base_uri { Url.Anchor. page; anchor; kind } =
+      let leaf = if !semantic_uris || kind = "page" then [] else ["index.html"] in
+      let target = Url.Path.as_list page @ leaf in
+      match xref_base_uri with
       (* If xref_base_uri is defined, do not perform relative URI resolution. *)
-      | Some xref_base_uri, { Url. page; anchor; kind } ->
-        let absolute_target =
-          List.rev (
-            if !semantic_uris || kind = "page" then
-              page
-            else
-              "index.html" :: page
-          )
-        in
-        let page = xref_base_uri ^ String.concat "/" absolute_target in
+      | Some xref_base_uri ->
+        let page = xref_base_uri ^ String.concat "/" target in
         begin match anchor with
         | "" -> page
         | anchor -> page ^ "#" ^ anchor
         end
-      | None, { Url. page; anchor; kind } ->
-        let target =
-          List.rev (
-            if !semantic_uris || kind = "page" then
-              page
-            else
-              "index.html" :: page
-          )
-        in
+      | None ->
         let current_loc =
           let path =
             let _, is_page = Stack.top path in

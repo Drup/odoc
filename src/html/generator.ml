@@ -353,7 +353,7 @@ let render_toc (toc : Toc.t) =
 
 let rec subpage ?theme_uri ~xref_base_uri
     ({Page. title; header; items = i ; toc; subpages; url }) =
-  Tree.enter (Odoc_document.Url.last url) ;
+  Tree.enter (Odoc_document.Url.Path.last url) ;
   let header_docs =
     render_toc toc @ block ~xref_base_uri header
   in

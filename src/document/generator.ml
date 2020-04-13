@@ -71,6 +71,8 @@ let type_var tv =
 let enclose ~l ~r x =
   O.df "%s%t%s" l x r
 
+let path p txt = 
+  O.df "%a" O.elt [inline @@ InternalLink (InternalLink.Resolved (Url.from_path p, txt))]
 let resolved p txt =
   O.df "%a" O.elt [inline @@ InternalLink (InternalLink.Resolved (p, txt))]
 let unresolved txt = 
@@ -617,8 +619,8 @@ struct
             Some (Comment.to_ir doc)
       in
       try
-        let { Url.Anchor. name = anchor; kind } =
-          Url.Anchor.Polymorphic_variant_decl.from_element ~type_ident item
+        let { Url.Anchor. anchor; kind ; _ } =
+          Url.Anchor.polymorphic_variant ~type_ident item
         in
         let attrs = ["def"; kind] in
         let code =
@@ -1294,16 +1296,12 @@ struct
     sections toc
 end
 
-(* TODO Figure out when this function would fail. It is currently pasted from
-   [make_def], but the [make_spec] version doesn't have a [failwith]. *)
 let path_to_id path =
-  match Url.from_identifier ~stop_before:true path with
-  | Error _ ->
+  match Url.Anchor.from_identifier path with
+  | Error _ | Ok {anchor=""; _} ->
     None
   | Ok {anchor; _} ->
     Some anchor
-
-
 
 module Class :
 sig
@@ -1436,10 +1434,7 @@ struct
         let doc = Comment.to_ir t.doc in
         let items, toc, _ = class_signature csig in
         let toc = Top_level_markup.render_toc toc in
-        let url =
-          Url.from_identifier_exn ~stop_before:false
-            (t.id :> Paths.Identifier.t)
-        in
+        let url = Url.Path.from_identifier t.id in
         let header = format_title `Class name @ doc in 
         let page = {Page.
           title = name ;
@@ -1450,7 +1445,7 @@ struct
           url ;
         }
         in
-        let link = resolved url [inline @@ Text name] in
+        let link = path url [inline @@ Text name] in
         (* Tree.leave (); *)
         link, [page]
     in
@@ -1485,9 +1480,7 @@ struct
       | None -> O.txt name, []
       | Some csig ->
         (* Tree.enter ~kind:(`Cty) name; *)
-        let url =
-          Url.from_identifier_exn ~stop_before:false (t.id :> Paths.Identifier.t)
-        in
+        let url = Url.Path.from_identifier t.id in
         let doc = Comment.to_ir t.doc in
         let items, toc, _ = class_signature csig in
         let toc = Top_level_markup.render_toc toc in
@@ -1501,7 +1494,7 @@ struct
           url ;
         }
         in
-        let link = resolved url [inline @@ Text name] in
+        let link = path url [inline @@ Text name] in
         (* Tree.leave (); *)
         link, [page]
     in
@@ -1642,11 +1635,8 @@ struct
           | e -> e
         in
         (* Tree.enter ~kind:(`Arg) link_name; *)
-        let url =
-          Url.from_identifier_exn ~stop_before:false
-            (arg.id :> Paths.Identifier.t)
-        in
-        let link = resolved url [inline @@ Text name] in
+        let url = Url.Path.from_identifier arg.id in
+        let link = path url [inline @@ Text name] in
         let items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
         let header = format_title `Arg name in
@@ -1729,11 +1719,8 @@ and module_expansion
         let doc = Comment.to_ir t.doc in
         let items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
-        let url =
-          Url.from_identifier_exn ~stop_before:false
-            (t.id :> Paths.Identifier.t)
-        in
-        let link = resolved url [inline @@ Text modname] in
+        let url = Url.Path.from_identifier t.id in
+        let link = path url [inline @@ Text modname] in
         let title = modname in
         let header = format_title `Mod modname @ doc in
         let page = {Page.
@@ -1806,11 +1793,8 @@ and module_expansion
         let doc = Comment.to_ir t.doc in
         let items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
-        let url =
-          Url.from_identifier_exn ~stop_before:false
-            (t.id :> Paths.Identifier.t)
-        in
-        let link = resolved url [inline @@ Text modname] in
+        let url = Url.Path.from_identifier t.id in
+        let link = path url [inline @@ Text modname] in
         let title = modname in
         let header = format_title `Mty modname @ doc in
         let page = {Page.
@@ -1998,9 +1982,7 @@ struct
     let header =
       format_title `Mod title  @ Comment.to_ir t.doc
     in
-    let url =
-      Url.from_identifier_exn ~stop_before:false (t.id :> Paths.Identifier.t)
-    in
+    let url = Url.Path.from_identifier t.id in
     let items, toc, subpages =
       match t.content with
       | Module sign ->
@@ -2018,10 +2000,7 @@ struct
       | `Page (_, name) -> name
     in
     let title = Odoc_model.Names.PageName.to_string name in
-    let url =
-      Url.from_identifier_exn ~stop_before:false
-        (t.name :> Paths.Identifier.t)
-    in
+    let url = Url.Path.from_identifier t.name in
     let items, doc, toc = Top_level_markup.lay_out_page t.content in
     let header = format_title `Page title @ doc in
     let toc = Top_level_markup.render_toc toc in

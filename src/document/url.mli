@@ -2,66 +2,70 @@ open Result
 
 open Odoc_model.Paths
 
-type t = {
-  page : string list;
-  (** [Foo.Bar.lol] becomes [["lol"; "Bar"; "Foo"]]. *)
-
-  anchor : string;
-  (** Anchor in {!page} where the element is attached *)
-
-  kind : string;
-  (** What kind of element the path points to.
-      e.g. "module", "module-type", "exception", ... *)
-}
-(** A low level representation of ocaml paths. *)
-
-val to_string : t -> string
 
 module Error : sig
   type nonrec t =
     | Not_linkable of string
     | Uncaught_exn of string
     (* These should basicaly never happen *)
-    | Unexpected_anchor of t * string
-    | Missing_anchor of t * string
+    | Unexpected_anchor of string
 
   val to_string : t -> string
 end
 
-val from_identifier
-  : stop_before:bool
-  -> Identifier.t
-  -> (t, Error.t) result
-val from_identifier_exn
-  : stop_before:bool
-  -> Identifier.t
-  -> t
 
-val from_reference
-  : stop_before:bool
-  -> Reference.Resolved.t
-  -> (t, Error.t) result
+module Path : sig
 
-val kind : Identifier.t -> string
-
-val render_path : Path.t -> string
-
-val last : t -> string
-
-module Anchor : sig
   type t = {
     kind : string;
+    parent : t option;
     name : string;
   }
 
-  module Polymorphic_variant_decl : sig
-    val from_element
-      : type_ident:Identifier.t
-      -> Odoc_model.Lang.TypeExpr.Polymorphic_variant.element
-      -> t
-  end
+  type source = [
+    | Identifier.Page.t
+    | Identifier.Signature.t
+    | Identifier.ClassSignature.t
+  ]
 
-  module Module_listing : sig
-    val from_reference : Reference.t -> t
-  end
+  val from_identifier : [< source] -> t
+
+  val last : t -> string
+  val as_list : t -> string list
+  val to_string : ?base:string -> t -> string
 end
+
+module Anchor : sig
+
+  type t = {
+    page : Path.t ;
+    anchor : string;
+    (** Anchor in {!page} where the element is attached *)
+
+    kind : string;
+    (** What kind of element the path points to.
+        e.g. "module", "module-type", "exception", ... *)
+  }
+
+  val from_identifier : Identifier.t -> (t, Error.t) result
+
+  val polymorphic_variant
+    : type_ident:Identifier.t
+    -> Odoc_model.Lang.TypeExpr.Polymorphic_variant.element
+    -> t
+end
+
+type t = Anchor.t
+
+val to_string : ?base:string -> t -> string
+
+val from_path : Path.t -> t
+
+val from_identifier : stop_before:bool -> Identifier.t -> (t, Error.t) result
+val from_identifier_exn : stop_before:bool -> Identifier.t -> t
+
+val kind : Identifier.t -> string
+
+val render_path : Odoc_model.Paths.Path.t -> string
+
+val page : t -> Path.t
