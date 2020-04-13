@@ -55,17 +55,15 @@ and styled style = match style with
   | `Superscript -> Html.sup
   | `Subscript -> Html.sub
 
-let rec internallink
-    ~(a: Html_types.span_attrib Html.attrib list)
-    (t : InternalLink.t) = match t with
+let rec internallink ~xref_base_uri ?(a=[]) (t : InternalLink.t) = match t with
   | Resolved (uri, content) ->
-    let href = Odoc_document.Url.to_string uri in
+    let href = Tree.Relative_link.Id.href ~xref_base_uri uri in
     let a = (a :> Html_types.a_attrib Html.attrib list) in
     let elt = Html.a ~a:(Html.a_href href :: a) (inline_nolink content) in
     let elt = (elt :> phrasing Html.elt) in
     [elt]
   | Unresolved content ->
-    let elt = Html.span ~a (inline content) in
+    let elt = Html.span ~a (inline ~xref_base_uri content) in
     let elt = (elt :> phrasing Html.elt) in
     [elt]
 
@@ -76,7 +74,7 @@ and internallink_nolink
   | Unresolved content ->
     [Html.span ~a (inline_nolink content)]
 
-and inline (l : Inline.t) : phrasing Html.elt list =
+and inline ~xref_base_uri (l : Inline.t) : phrasing Html.elt list =
   let one (t : Inline.one) = 
     let a = class_ t.attr in
     match t.desc with
@@ -87,14 +85,14 @@ and inline (l : Inline.t) : phrasing Html.elt list =
     | Linebreak ->
       [Html.br ~a ()]
     | Styled (style, c) ->
-      [styled style (inline c) ]
+      [styled style (inline ~xref_base_uri c) ]
     | Link (href, c) ->
       let a = (a :> Html_types.a_attrib Html.attrib list) in
       [Html.a ~a:(Html.a_href href :: a) (inline_nolink c)]
     | InternalLink c ->
-      internallink ~a c
+      internallink ~xref_base_uri ~a c
     | Source c ->
-      source inline ~a c
+      source (inline ~xref_base_uri) ~a c
     | Raw_markup r ->
       raw_markup r
   in
@@ -123,12 +121,12 @@ and inline_nolink (l : Inline.t) : non_link_phrasing Html.elt list =
   in
   Utils.list_concat_map ~f:one l
 
-let heading ~a (h : Heading.t) =
+let heading ~xref_base_uri ~a (h : Heading.t) =
   let a = match h.label with
     | Some id -> Html.a_id id :: a
     | None -> a
   in
-  let content = inline h.title in
+  let content = inline ~xref_base_uri h.title in
   let mk =
     match h.level with
     | 1 -> Html.h1
@@ -141,7 +139,8 @@ let heading ~a (h : Heading.t) =
   mk ~a content
 
 
-let rec block_no_heading (l: Block.t) : flow_no_heading Html.elt list =
+let rec block_no_heading
+    ~xref_base_uri (l: Block.t) : flow_no_heading Html.elt list =
   let as_flow x =
     (x : phrasing Html.elt list :> [> flow_no_heading] Html.elt list)
   in
@@ -150,18 +149,19 @@ let rec block_no_heading (l: Block.t) : flow_no_heading Html.elt list =
     match t.desc with
     | Inline i ->
       if a = [] then
-        as_flow @@ inline i
+        as_flow @@ inline ~xref_base_uri i
       else
-        [Html.span ~a (inline i)]
+        [Html.span ~a (inline ~xref_base_uri i)]
     | Paragraph i ->
-      [Html.p ~a (inline i)]
+      [Html.p ~a (inline ~xref_base_uri i)]
     | List (typ, l) ->
       let mk = match typ with Ordered -> Html.ol | Unordered -> Html.ul in
-      [mk ~a (List.map (fun x -> Html.li (block_no_heading x)) l)]
+      [mk ~a (List.map
+            (fun x -> Html.li (block_no_heading ~xref_base_uri x)) l)]
     | Description l ->
       [Html.dl ~a (Utils.list_concat_map l ~f:(fun (i,b) ->
-          let i = as_flow @@ inline i in
-          [Html.dt i ; Html.dd (block_no_heading b) ]
+          let i = as_flow @@ inline ~xref_base_uri i in
+          [Html.dt i ; Html.dd (block_no_heading ~xref_base_uri b) ]
         ))]
     | Heading _h -> [] (* What should we do here ? *)
     | Raw_markup r ->
@@ -169,11 +169,11 @@ let rec block_no_heading (l: Block.t) : flow_no_heading Html.elt list =
     | Verbatim s ->
       [Html.pre ~a [Html.txt s]]
     | Source c ->
-      as_flow @@ source inline ~a c
+      as_flow @@ source (inline ~xref_base_uri) ~a c
   in 
   Utils.list_concat_map l ~f:one
 
-let block (l: Block.t) : [> flow] Html.elt list =
+let block ~xref_base_uri (l: Block.t) : [> flow] Html.elt list =
   let as_flow x =
     (x : phrasing Html.elt list :> [> flow] Html.elt list)
   in
@@ -182,29 +182,29 @@ let block (l: Block.t) : [> flow] Html.elt list =
     match t.desc with
     | Inline i ->
       if a = [] then
-        as_flow @@ inline i
+        as_flow @@ inline ~xref_base_uri i
       else
-        [Html.span ~a (inline i)]
+        [Html.span ~a (inline ~xref_base_uri i)]
     | Paragraph i ->
-      [Html.p ~a (inline i)]
+      [Html.p ~a (inline ~xref_base_uri i)]
     | List (typ, l) ->
       let mk = match typ with Ordered -> Html.ol | Unordered -> Html.ul in
-      [mk ~a (List.map (fun x -> Html.li (block_no_heading x)) l)]
+      [mk ~a (List.map (fun x -> Html.li (block_no_heading ~xref_base_uri x)) l)]
     | Description l ->
       [Html.dl ~a (Utils.list_concat_map l ~f:(fun (i,b) ->
           let i =
-            (inline i : phrasing Html.elt list :> flow_no_heading Html.elt list)
+            (inline ~xref_base_uri i : phrasing Html.elt list :> flow_no_heading Html.elt list)
           in
-          [Html.dt i ; Html.dd (block_no_heading b) ]
+          [Html.dt i ; Html.dd (block_no_heading ~xref_base_uri b) ]
         ))]
     | Heading h ->
-      [heading ~a h]
+      [heading ~xref_base_uri ~a h]
     | Raw_markup r ->
       raw_markup r
     | Verbatim s ->
       [Html.pre ~a [Html.txt s]]
     | Source c ->
-      as_flow @@ source inline ~a c
+      as_flow @@ source (inline ~xref_base_uri) ~a c
   in 
   Utils.list_concat_map l ~f:one
 
@@ -215,7 +215,7 @@ let anchor_link anchor =
 let anchor_attrib anchor =
   [ Html.a_id anchor; Html.a_class ["anchored"] ]
 
-let documentedSrc (t : DocumentedSrc.t) =
+let documentedSrc ~xref_base_uri (t : DocumentedSrc.t) =
   let rec coalece acc ?current (content : DocumentedSrc.t) =
     let (+:?) x l = Option.fold ~none:l ~some:(fun x -> x :: l) x in
     match current, content with
@@ -247,16 +247,16 @@ let documentedSrc (t : DocumentedSrc.t) =
     Utils.list_concat_map t ~f:(function 
       | `O (attr, code) ->
         let a = class_ attr in
-        source inline ~a code
+        source (inline ~xref_base_uri) ~a code
       | `T l ->
         let one {DocumentedSrc. attrs ; anchor ; code ; doc } =
           let content = match code with
-            | `D code -> (inline code :> flow_no_heading Html.elt list)
+            | `D code -> (inline ~xref_base_uri code :> flow_no_heading Html.elt list)
             | `N n -> to_html n
           in
           let doc = match doc with
             | [] -> []
-            | doc -> [Html.td ~a:(class_ ["doc"]) (block_no_heading doc)]
+            | doc -> [Html.td ~a:(class_ ["doc"]) (block_no_heading ~xref_base_uri doc)]
           in
           Html.tr ~a:(anchor_attrib anchor)
             (Html.td ~a:(class_ attrs)
@@ -267,20 +267,20 @@ let documentedSrc (t : DocumentedSrc.t) =
   in
   to_html @@ coalece [] t
 
-let rec item (t : Item.t) =
+let rec item ~xref_base_uri (t : Item.t) =
   let as_item x = (x : flow Html.elt list :> item Html.elt list) in
   match t with
   | Text content ->
-    [Html.aside (as_item @@ block content)]
+    [Html.aside (as_item @@ block ~xref_base_uri content)]
   | Section (header, content) ->
-    let h = block header in
-    [Html.section (Html.header h :: items content)]
+    let h = block ~xref_base_uri header in
+    [Html.section (Html.header h :: items ~xref_base_uri content)]
   | Nested
       ({ attr; anchor; content = { summary; status; items = i } }, docs)
     ->
-    let docs = as_item @@ block docs in
-    let summary = inline summary in
-    let included_html = items i in
+    let docs = as_item @@ block ~xref_base_uri docs in
+    let summary = inline ~xref_base_uri summary in
+    let included_html = items ~xref_base_uri i in
     let content = match status with
       | `Inline ->
         included_html
@@ -307,8 +307,8 @@ let rec item (t : Item.t) =
       | None -> [], []
     in
     let a = class_ attr @ anchor_attrib in
-    let content = documentedSrc content in
-    let docs = optional_elt Html.div (block_no_heading docs) in
+    let content = documentedSrc ~xref_base_uri content in
+    let docs = optional_elt Html.div (block_no_heading ~xref_base_uri docs) in
     [Html.div ~a (anchor_link @ content)] @ docs
   | Declarations (l, docs) -> 
     let content = List.map (fun {Item. attr; anchor ; content} ->
@@ -317,14 +317,14 @@ let rec item (t : Item.t) =
         | None -> [], []
       in
       let a = class_ attr @ anchor_attrib in
-      let content = documentedSrc content in
+      let content = documentedSrc ~xref_base_uri content in
       Html.dt ~a (anchor_link @ content)
     ) l
     in 
-    let docs = optional_elt Html.dd (block_no_heading docs) in
+    let docs = optional_elt Html.dd (block_no_heading ~xref_base_uri docs) in
     [Html.dl (content @ docs)]
 
-and items l = Utils.list_concat_map ~f:item l
+and items ~xref_base_uri l = Utils.list_concat_map ~f:(item ~xref_base_uri) l
 
 let render_toc (toc : Toc.t) =
   let rec section {Toc. anchor ; text ; children } =
@@ -351,14 +351,14 @@ let render_toc (toc : Toc.t) =
   | [] -> []
   | _ -> [Html.nav ~a:[Html.a_class ["toc"]] [sections toc]]
 
-let rec subpage ?theme_uri
+let rec subpage ?theme_uri ~xref_base_uri
     ({Page. title; header; items = i ; toc; subpages; url }) =
   Tree.enter (Odoc_document.Url.last url) ;
   let header_docs =
-    render_toc toc @ block header
+    render_toc toc @ block ~xref_base_uri header
   in
-  let content = items i in
-  let subpages = List.map (subpage ?theme_uri) subpages in
+  let content = items ~xref_base_uri i in
+  let subpages = List.map (subpage ?theme_uri ~xref_base_uri) subpages in
   let page =
     Tree.make ?theme_uri ~header_docs title content subpages
   in
@@ -367,6 +367,6 @@ let rec subpage ?theme_uri
 
 let render ?theme_uri package page =
   Tree.enter package;
-  subpage ?theme_uri page
+  subpage ?theme_uri ~xref_base_uri:None page
 
-let doc b = (block b :> item Html.elt list)
+let doc ~xref_base_uri b = (block ~xref_base_uri b :> item Html.elt list)

@@ -55,7 +55,7 @@ module Relative_link = struct
     exception Not_linkable
     exception Can't_stop_before
 
-    val href : ?xref_base_uri:string -> Odoc_document.Url.t -> string
+    val href : xref_base_uri:string option -> Odoc_document.Url.t -> string
   end = struct    
     exception Not_linkable
 
@@ -67,7 +67,7 @@ module Relative_link = struct
 
     exception Can't_stop_before
 
-    let href ?xref_base_uri url =
+    let href ~xref_base_uri url =
       match xref_base_uri, url with
       (* If xref_base_uri is defined, do not perform relative URI resolution. *)
       | Some xref_base_uri, { Url. page; anchor; kind } ->
