@@ -281,17 +281,19 @@ let rec item ~xref_base_uri (t : Item.t) =
     let docs = as_item @@ block ~xref_base_uri docs in
     let summary = inline ~xref_base_uri summary in
     let included_html = items ~xref_base_uri i in
-    let content = match status with
+    let content =
+      let mk b =
+        let a = if b then [Html.a_open ()] else [] in
+        [Html.details ~a
+            (Html.summary [Html.span ~a:[Html.a_class ["def"]] summary])
+            included_html]
+      in
+      match status with
       | `Inline ->
         included_html
-      | `Closed ->
-        [Html.details
-          (Html.summary [Html.span ~a:[Html.a_class ["def"]] summary])
-          included_html]
-      | `Open -> 
-        [Html.details ~a:[Html.a_open ()]
-          (Html.summary [Html.span ~a:[Html.a_class ["def"]] summary])
-          included_html]
+      | `Closed -> mk false        
+      | `Open -> mk true
+      | `Default -> mk !Tree.open_details
     in
     let anchor_attrib, anchor_link = match anchor with
       | Some a -> anchor_attrib a, anchor_link a

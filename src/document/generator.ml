@@ -1904,33 +1904,23 @@ and module_expansion
         type_expr te
 
 and include_ heading_level_shift (t : Odoc_model.Lang.Include.t) =
-  let should_be_inlined =
-    let is_inline_tag element =
-      element.Odoc_model.Location_.value = `Tag `Inline in
-    List.exists is_inline_tag t.doc
+  let status =
+    let is_inline_tag element = element.Odoc_model.Location_.value = `Tag `Inline in
+    let is_open_tag element = element.Odoc_model.Location_.value = `Tag `Open in
+    let is_closed_tag element = element.Odoc_model.Location_.value = `Tag `Closed in
+    if List.exists is_inline_tag t.doc then `Inline
+    else if List.exists is_open_tag t.doc then `Open
+    else if List.exists is_closed_tag t.doc then `Closed
+    else `Default
   in
   let items, toc, tree =
     let heading_level_shift =
-      if should_be_inlined then
+      if status = `Inline then
         Some heading_level_shift
       else
         None
     in
     signature ?heading_level_shift t.expansion.content
-  in
-  let should_be_open =
-    let is_open_tag element = element.Odoc_model.Location_.value = `Tag `Open in
-    let is_closed_tag element =
-      element.Odoc_model.Location_.value = `Tag `Closed in
-    if List.exists is_open_tag t.doc then
-      true
-    else
-      not (List.exists is_closed_tag t.doc)
-  in
-  let status =
-    if should_be_inlined then `Inline
-    else if should_be_open then `Open
-    else `Closed
   in
   let summary = 
     O.code (
@@ -1942,7 +1932,7 @@ and include_ heading_level_shift (t : Odoc_model.Lang.Include.t) =
   in
   let nested = {Nested. items; status; summary} in
   (* XXX Improve representation of toc *)
-  let toc = if should_be_inlined then toc else [] in
+  let toc = if status = `Inline then toc else [] in
   `Nested nested, t.doc, toc, tree
 
 end

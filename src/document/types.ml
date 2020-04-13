@@ -145,7 +145,7 @@ end = DocumentedSrc
 
 and Nested : sig
 
-  type status = [ `Inline | `Open | `Closed ]
+  type status = [ `Inline | `Open | `Closed | `Default ]
 
   type t = {
     summary : Inline.t ;
