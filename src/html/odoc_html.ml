@@ -1,5 +1,4 @@
 module Tree = Tree
-module Comment = Comment
 module Targets = Targets
 
 module Generator = Generator
