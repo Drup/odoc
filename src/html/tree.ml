@@ -17,9 +17,8 @@
 
 
 module Html = Tyxml.Html
-module Paths = Odoc_model.Paths
+module DUrl = Odoc_document.Url
 
-open Odoc_model.Names
 
 type syntax = OCaml | Reason
 
@@ -46,30 +45,18 @@ let stack_to_list s =
   Stack.iter (fun x -> acc := x :: !acc) s;
   !acc
 
-let enter ?kind name = Stack.push (name, kind) path
+let enter ?(page=false) name = Stack.push (name, page) path
 let leave () = ignore @@ Stack.pop path
 
-(* FIXME: reuse [Url.kind] *)
-let stack_elt_to_path_fragment = function
-  | (name, None)
-  | (name, Some `Page) -> name (* fixme? *)
-  | (name, Some `Mod) -> name
-  | (name, Some `Mty) -> "module-type-" ^ name
-  | (name, Some `Arg) -> "argument-" ^ name
-  | (name, Some `Class) -> "class-" ^ name
-  | (name, Some `Cty) -> "class-type-" ^ name
-
 module Relative_link = struct
-  open Odoc_model.Paths
-
   let semantic_uris = ref false
 
   module Id : sig
     exception Not_linkable
     exception Can't_stop_before
 
-    val href : ?xref_base_uri:string -> stop_before:bool -> Identifier.t -> string
-  end = struct
+    val href : ?xref_base_uri:string -> Odoc_document.Url.t -> string
+  end = struct    
     exception Not_linkable
 
     let rec drop_shared_prefix l1 l2 =
@@ -80,10 +67,10 @@ module Relative_link = struct
 
     exception Can't_stop_before
 
-    let href ?xref_base_uri ~stop_before id =
-      match xref_base_uri, Url.from_identifier ~stop_before id with
+    let href ?xref_base_uri url =
+      match xref_base_uri, url with
       (* If xref_base_uri is defined, do not perform relative URI resolution. *)
-      | Some xref_base_uri, Ok { Url. page; anchor; kind } ->
+      | Some xref_base_uri, { Url. page; anchor; kind } ->
         let absolute_target =
           List.rev (
             if !semantic_uris || kind = "page" then
@@ -97,7 +84,7 @@ module Relative_link = struct
         | "" -> page
         | anchor -> page ^ "#" ^ anchor
         end
-      | None, Ok { Url. page; anchor; kind } ->
+      | None, { Url. page; anchor; kind } ->
         let target =
           List.rev (
             if !semantic_uris || kind = "page" then
@@ -108,15 +95,15 @@ module Relative_link = struct
         in
         let current_loc =
           let path =
-            match Stack.top path with
-            | (_, Some `Page) ->
+            let _, is_page = Stack.top path in
+            if is_page then
               (* Sadness. *)
               let s = Stack.copy path in
               ignore (Stack.pop s);
               s
-            | _ -> path
+            else path
           in
-          List.map stack_elt_to_path_fragment (stack_to_list path)
+          List.map fst (stack_to_list path)
         in
         let current_from_common_ancestor, target_from_common_ancestor =
           drop_shared_prefix current_loc target
@@ -130,117 +117,31 @@ module Relative_link = struct
         | "" -> page
         | anchor -> page ^ "#" ^ anchor
         end
-      | _, Error e ->
-        (* TODO: handle errors better, perhaps by returning a [result] *)
-        match e with
-        | Not_linkable _ -> raise Not_linkable
-        | otherwise ->
-          Printf.eprintf "%s\n%!" (Url.Error.to_string otherwise);
-          exit 1
   end
 
-  module Of_path = struct
-    let rec to_html : stop_before:bool -> Path.t -> _ =
-      fun ~stop_before path ->
-        match path with
-        | `Root root -> [ Html.txt root ]
-        | `Forward root -> [ Html.txt root ] (* FIXME *)
-        | `Dot (prefix, suffix) ->
-          let link = to_html ~stop_before:true (prefix :> Path.t) in
-          link @ [ Html.txt ("." ^ suffix) ]
-        | `Apply (p1, p2) ->
-          let link1 = to_html ~stop_before (p1 :> Path.t) in
-          let link2 = to_html ~stop_before (p2 :> Path.t) in
-          link1 @ Html.txt "(":: link2 @ [ Html.txt ")" ]
-        | `Resolved rp ->
-          let id = Path.Resolved.identifier rp in
-          let txt = Url.render_path path in
-          begin match Id.href ~stop_before id with
-          | href -> [ Html.a ~a:[ Html.a_href href ] [ Html.txt txt ] ]
-          | exception Id.Not_linkable -> [ Html.txt txt ]
-          | exception exn ->
-            Printf.eprintf "Id.href failed: %S\n%!" (Printexc.to_string exn);
-            [ Html.txt txt ]
-          end
-  end
+  (* let of_path ~stop_before p =
+   *   Of_path.to_html ~stop_before p
+   * 
+   * let of_fragment ~base frag =
+   *   Of_fragment.to_html ~stop_before:false base frag *)
 
-  module Of_fragment = struct
-    let dot prefix suffix =
-      match prefix with
-      | "" -> suffix
-      | _  -> prefix ^ "." ^ suffix
-
-    let rec render_raw : Fragment.t -> string =
-      fun fragment ->
-        match fragment with
-        | `Resolved rr -> render_resolved rr
-        | `Dot (prefix, suffix) -> dot (render_raw (prefix :> Fragment.t)) suffix
-
-    and render_resolved : Fragment.Resolved.t -> string =
-      let open Fragment.Resolved in
-      fun fragment ->
-        match fragment with
-        | `Root -> ""
-        | `Subst (_, rr) -> render_resolved (rr :> t)
-        | `SubstAlias (_, rr) -> render_resolved (rr :> t)
-        | `Module (rr, s) -> dot (render_resolved (rr :> t)) (ModuleName.to_string s)
-        | `Type (rr, s) -> dot (render_resolved (rr :> t)) (TypeName.to_string s)
-        | `Class (rr, s) -> dot (render_resolved ( rr :> t)) (ClassName.to_string s)
-        | `ClassType (rr, s) -> dot (render_resolved (rr :> t)) (ClassTypeName.to_string s)
-
-    let rec to_html : stop_before:bool ->
-      Identifier.Signature.t -> Fragment.t -> _ =
-      fun ~stop_before id fragment ->
-        let open Fragment in
-        match fragment with
-        | `Resolved `Root ->
-          begin match Id.href ~stop_before:true (id :> Identifier.t) with
-          | href ->
-            [Html.a ~a:[Html.a_href href] [Html.txt (Identifier.name id)]]
-          | exception Id.Not_linkable -> [ Html.txt (Identifier.name id) ]
-          | exception exn ->
-            Printf.eprintf "[FRAG] Id.href failed: %S\n%!" (Printexc.to_string exn);
-            [ Html.txt (Identifier.name id) ]
-          end
-        | `Resolved rr ->
-          let id = Resolved.identifier id (rr :> Resolved.t) in
-          let txt = render_resolved rr in
-          begin match Id.href ~stop_before id with
-          | href ->
-            [ Html.a ~a:[ Html.a_href href ] [ Html.txt txt ] ]
-          | exception Id.Not_linkable -> [ Html.txt txt ]
-          | exception exn ->
-            Printf.eprintf "[FRAG] Id.href failed: %S\n%!" (Printexc.to_string exn);
-            [ Html.txt txt ]
-          end
-        | `Dot (prefix, suffix) ->
-          let link = to_html ~stop_before:true id (prefix :> Fragment.t) in
-          link @ [ Html.txt ("." ^ suffix) ]
-  end
-
-  let of_path ~stop_before p =
-    Of_path.to_html ~stop_before p
-
-  let of_fragment ~base frag =
-    Of_fragment.to_html ~stop_before:false base frag
-
-  let to_sub_element ~kind name =
-    (* FIXME: Reuse [Url]. *)
-    let prefix =
-      match kind with
-      | `Mod   -> ""
-      | `Mty   -> "module-type-"
-      | `Arg   -> "argument-"
-      | `Class -> "class-"
-      | `Cty   -> "class-type-"
-      | `Page  -> assert false
-    in
-    Html.a_href (prefix ^ name ^ (if !semantic_uris then "" else "/index.html"))
+  (* let to_sub_element ~kind name =
+   *   (\* FIXME: Reuse [Url]. *\)
+   *   let prefix =
+   *     match kind with
+   *     | `Mod   -> ""
+   *     | `Mty   -> "module-type-"
+   *     | `Arg   -> "argument-"
+   *     | `Class -> "class-"
+   *     | `Cty   -> "class-type-"
+   *     | `Page  -> assert false
+   *   in
+   *   Html.a_href (prefix ^ name ^ (if !semantic_uris then "" else "/index.html")) *)
 end
 
-let render_fragment = Relative_link.Of_fragment.render_raw
+(* let render_fragment = Relative_link.Of_fragment.render_raw *)
 
-let page_creator ?kind ?(theme_uri = Relative "./") ~path header_docs content =
+let page_creator ?(is_page=false) ?(theme_uri = Relative "./") ~path name header_docs content =
   let rec add_dotdot ~n acc =
     if n <= 0 then
       acc
@@ -258,14 +159,11 @@ let page_creator ?kind ?(theme_uri = Relative "./") ~path header_docs content =
     let n =
       List.length path - (
         (* This is just horrible. *)
-        match kind with
-        | Some `Page -> 1
-        | _ -> 0)
+        if is_page then 1 else 0)
     in
     add_dotdot uri ~n
   in
 
-  let name = List.hd @@ List.rev path in
   let head : Html_types.head Html.elt =
     let title_string = Printf.sprintf "%s (%s)" name (String.concat "." path) in
 
@@ -293,44 +191,40 @@ let page_creator ?kind ?(theme_uri = Relative "./") ~path header_docs content =
   in
 
   let wrapped_content : (Html_types.div_content Html.elt) list =
-    let title_prefix =
-      match kind with
-      | None
-      | Some `Mod -> Some "Module"
-      | Some `Arg -> Some "Parameter"
-      | Some `Mty -> Some "Module type"
-      | Some `Cty -> Some "Class type"
-      | Some `Class -> Some "Class"
-      | Some `Page -> None
-    in
+    (* let title_prefix =
+     *   match is_page with
+     *   | None
+     *   | Some `Mod -> Some "Module"
+     *   | Some `Arg -> Some "Parameter"
+     *   | Some `Mty -> Some "Module type"
+     *   | Some `Cty -> Some "Class type"
+     *   | Some `Class -> Some "Class"
+     *   | Some  * `Page -> None
+    in *)
 
-    let header_docs =
-      match title_prefix with
-      | None ->
-        header_docs
-      | Some prefix ->
-        let title_heading =
-          Html.h1 [
-            Html.txt @@ prefix ^ " ";
-            Html.code [
-              (* Shorten path to at most 2 levels *)
-              match List.tl path |> List.rev with
-              | y :: x :: _ -> Html.txt @@ x ^ "." ^ y
-              | x :: _ -> Html.txt x
-              | _ -> Html.txt "" (* error *)
-            ]
-          ]
-        in
-        title_heading::header_docs
-    in
+    (* let header_docs =
+     *   if is_page then
+     *     header_docs
+     *   else
+     *     let title_heading =
+     *       Html.h1 [
+     *         Html.code [
+     *           (\* (\\* Shorten path to at most 2 levels *\\)
+     *            * match List.tl path |> List.rev with
+     *            * | y :: x :: _ -> Html.txt @@ x ^ "." ^ y
+     *            * | x :: _ -> Html.txt x
+     *            * | _ -> Html.txt "" (\\* error *\\) *\)
+     *           Html.txt name
+     *         ]
+     *       ]
+     *     in
+     *     title_heading::header_docs
+     * in *)
 
     let header_content =
       let dot = if !Relative_link.semantic_uris then "" else "index.html" in
       let dotdot = add_dotdot ~n:1 dot in
-      let up_href = match kind with
-      | Some `Page when name <> "index" -> dot
-      | _ -> dotdot
-      in
+      let up_href = if is_page && name <> "index" then dot else dotdot in
       let has_parent = List.length path > 1 in
       if has_parent then
         let nav =
@@ -342,13 +236,14 @@ let page_creator ?kind ?(theme_uri = Relative "./") ~path header_docs content =
           ] @
             (* Create breadcrumbs *)
             let space = Html.txt " " in
-            let breadcrumb_spec = match kind with
-            | Some `Page -> (fun n x -> n, dot, x)
-            | _ -> (fun n x -> n, add_dotdot ~n dot, x)
+            let breadcrumb_spec =
+              if is_page
+              then (fun n x -> n, dot, x)
+              else (fun n x -> n, add_dotdot ~n dot, x)
             in
-            let rev_path = match kind with
-            | Some `Page when name = "index" -> List.tl (List.rev path)
-            | _ -> List.rev path
+            let rev_path = if is_page && name = "index"
+              then List.tl (List.rev path)
+              else List.rev path
             in
             rev_path |>
             List.mapi breadcrumb_spec |>
@@ -376,12 +271,11 @@ let page_creator ?kind ?(theme_uri = Relative "./") ~path header_docs content =
 
   html
 
-let make ?(header_docs = []) ?theme_uri content children =
+let make ?(header_docs = []) ?theme_uri title content children =
   assert (not (Stack.is_empty path));
-  let name    = stack_elt_to_path_fragment (Stack.top path) in
-  let kind    = snd (Stack.top path) in
+  let name, is_page = Stack.top path in
   let path    = List.map fst (stack_to_list path) in
-  let content = page_creator ?kind ?theme_uri ~path header_docs content in
+  let content = page_creator ~is_page ?theme_uri ~path title header_docs content in
   { name; content; children }
 
 let traverse ~f t =
