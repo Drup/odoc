@@ -197,7 +197,12 @@ let rec inline_element ?xref_base_uri : Comment.inline_element -> Inline.t =
     in
     Reference.to_ir ?text:content ?xref_base_uri ~stop_before:false path
   | `Link (target, content) ->
-    [inline @@ Link (target, non_link_inline_element_list content)]
+    let content =
+      match content with
+      | [] -> [inline @@ Text target]
+      | _ -> non_link_inline_element_list content
+    in
+    [inline @@ Link (target, content)]
 
 and inline_element_list ?xref_base_uri elements =
   List.concat @@ List.map
@@ -317,6 +322,7 @@ let block_element
       | `Paragraph -> 5
       | `Subparagraph -> 6
     in
+    let label = Some label in
     Some { attr = [] ; desc = Block.Heading {label; level; title}}
 
   | `Tag t ->

@@ -12,6 +12,10 @@ type t = {
   kind : string;
 }
 
+let last x = match x.page with
+  | [] -> assert false
+  | s :: _ -> s
+
 let to_string { page; anchor; _ } =
   String.concat ~sep:"/" (List.rev page) ^ "#" ^ anchor
 

@@ -46,6 +46,8 @@ val kind : Identifier.t -> string
 
 val render_path : Path.t -> string
 
+val last : t -> string
+
 module Anchor : sig
   type t = {
     kind : string;

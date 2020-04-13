@@ -84,7 +84,7 @@ end = Inline
 and Heading : sig
 
   type t = {
-    label : string ;
+    label : string option ;
     level : int ;
     title : Inline.t ;
   }
@@ -125,24 +125,21 @@ end = Block
 
 and DocumentedSrc : sig
 
-  type t = line list
-  and line =
+  type 'a documented = {
+    attrs : Class.t ;
+    anchor : string ;
+    code : 'a ;
+    doc : Block.t ;
+  }
+
+  type t = one list
+  and one =
     | Code of {
       attr : Class.t ;
       code : Source.t ;
     }
-    | Documented of {
-        attrs : Class.t ;
-        anchor : string ;
-        code : Inline.t ;
-        doc : Block.t ;
-      }
-    | Nested of {
-        attrs : Class.t ;
-        anchor : string ;
-        code : t ;
-        doc : Block.t ;
-      }
+    | Documented of Inline.t documented
+    | Nested of t documented
 
 end = DocumentedSrc
 
@@ -151,7 +148,7 @@ and Nested : sig
   type status = [ `Inline | `Open | `Closed ]
 
   type t = {
-    content : Block.t ;
+    summary : Inline.t ;
     status : status ;
     items : Item.t list ;
   }
@@ -168,12 +165,12 @@ and Item : sig
   }
 
   type declaration = DocumentedSrc.t item
-  type text = Block.t item
+  type text = Block.t
   
   type t =
     | Text of text
-    | Declarations of declaration list * Block.t option
-    | Nested of Nested.t item * Block.t option
+    | Declarations of declaration list * Block.t
+    | Nested of Nested.t item * Block.t
     | Section of Block.t * t list
 
 end = Item
