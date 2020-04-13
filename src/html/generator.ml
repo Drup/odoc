@@ -250,16 +250,17 @@ let documentedSrc (t : DocumentedSrc.t) =
         source inline ~a code
       | `T l ->
         let one {DocumentedSrc. attrs ; anchor ; code ; doc } =
-          let a = class_ attrs @ anchor_attrib anchor in
           let content = match code with
             | `D code -> (inline code :> flow_no_heading Html.elt list)
             | `N n -> to_html n
           in
           let doc = match doc with
             | [] -> []
-            | doc -> [Html.td (block_no_heading doc)]
+            | doc -> [Html.td ~a:(class_ ["doc"]) (block_no_heading doc)]
           in
-          Html.tr ~a (Html.td (anchor_link anchor @ content) :: doc)
+          Html.tr ~a:(anchor_attrib anchor)
+            (Html.td ~a:(class_ attrs)
+                (anchor_link anchor @ content) :: doc)
         in
         [Html.table (List.map one l)]
     )

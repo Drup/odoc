@@ -714,7 +714,6 @@ struct
 
   let type_decl ?(is_substitution=false) ((recursive, t) : Lang.Signature.recursive * Lang.TypeDecl.t) =
     let tyname = Paths.Identifier.name t.id in
-    let params = format_params t.equation.params in
     let constraints = format_constraints t.equation.constraints in
     let manifest, need_private = 
       match t.equation.manifest with
@@ -723,13 +722,13 @@ struct
           polymorphic_variant ~type_ident:(t.id :> Paths.Identifier.t) variant
         in
         let manifest =
-          O.documentedSrc (O.txt (if is_substitution then " := " else " = ") ++
-            if t.equation.private_ then
-              O.keyword Syntax.Type.private_keyword ++ O.txt " "
-            else
-              O.noop)
-          @ [DocumentedSrc.Nested
-              { attrs = ["manifest"] ; anchor = "" ; code ; doc = [] }]
+          O.documentedSrc
+            (O.txt (if is_substitution then " := " else " = ") ++
+                if t.equation.private_ then
+                  O.keyword Syntax.Type.private_keyword ++ O.txt " "
+                else
+                  O.noop)
+          @ code
         in
         manifest, false
       | _ ->
@@ -755,6 +754,13 @@ struct
             O.noop
         ) @ content
     in
+    let tconstr =
+      match t.equation.params with
+      | [] -> O.txt tyname
+      | l ->
+        let params = format_params l in
+        Syntax.Type.handle_constructor_params (O.txt tyname) params
+    in
     let tdecl_def =
       let keyword' =
         match recursive with
@@ -762,10 +768,7 @@ struct
         | And -> O.keyword "and"
         | Nonrec -> O.keyword "type" ++ O.txt " " ++ O.keyword "nonrec"
       in
-      O.documentedSrc (
-          keyword' ++ O.txt " "
-          ++ (Syntax.Type.handle_constructor_params (O.txt tyname) params)
-        )
+      O.documentedSrc (keyword' ++ O.txt " " ++ tconstr)
       @ manifest
       @ representation
       @ O.documentedSrc constraints
