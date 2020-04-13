@@ -49,10 +49,10 @@ let label = function
   | Optional s -> O.df "?%t%s" (O.entity "#8288") s
 
 let tag tag t = 
-  O.df "@[<%s>%t@]" tag t
+  O.df "@{<%s>%t@}" tag t
 
 let type_var tv =
-  O.df "@[<type-var>%s@]" tv
+  tag "type-var" (O.txt tv)
 
 let enclose ~l ~r x =
   O.df "%s%t%s" l x r

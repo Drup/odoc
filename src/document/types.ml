@@ -53,8 +53,10 @@ end = Raw_markup
 and Source : sig
 
   type t = token list
-  and decoration = string
-  and token = decoration option * Inline.t
+  and tag = string option
+  and token =
+    | Elt of Inline.t
+    | Tag of tag * t
 
 end = Source
 

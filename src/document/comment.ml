@@ -19,7 +19,8 @@ open Types
 module Comment = Odoc_model.Comment
 open Odoc_model.Names
 
-let source_of_code s = [None, [inline @@ Inline.Text s]]
+let source_of_code s =
+  if s = "" then [] else [Source.Elt [inline @@ Inline.Text s]]
 
 module Reference = struct
   open Odoc_model.Paths
@@ -274,7 +275,7 @@ let tag : ?xref_base_uri:string ->
     let target =
       match kind with
       | `Url -> Inline.Link (target, [inline @@ Text target])
-      | `File -> Inline.Source [None, [inline @@ Text target]]
+      | `File -> Inline.Source (source_of_code target)
       | `Document -> Inline.Text target
     in
     description
