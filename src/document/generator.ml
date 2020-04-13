@@ -31,6 +31,7 @@ let functor_arg_pos { Odoc_model.Lang.FunctorParameter.id ; _ } =
 module O = Codefmt
 open O.Infix
 
+(* TODO: Title formatting should be a renderer decision *)
 let format_title kind name =
   let mk title =
     let level = 1 and label = None in 
@@ -45,6 +46,11 @@ let format_title kind name =
   | `Class -> prefix "Class"
   | `Page -> mk [inline @@ Text name]
 
+let make_name_from_path {Url.Path. name ; parent ; _ } =
+  match parent with
+  | None -> name
+  | Some p ->
+    Printf.sprintf "%s.%s" p.name name
 
 let rec flatmap ?sep ~f = function
   | [] -> []
@@ -1435,7 +1441,7 @@ struct
         let items, toc, _ = class_signature csig in
         let toc = Top_level_markup.render_toc toc in
         let url = Url.Path.from_identifier t.id in
-        let header = format_title `Class name @ doc in 
+        let header = format_title `Class (make_name_from_path url) @ doc in 
         let page = {Page.
           title = name ;
           header ;
@@ -1484,7 +1490,7 @@ struct
         let doc = Comment.to_ir t.doc in
         let items, toc, _ = class_signature csig in
         let toc = Top_level_markup.render_toc toc in
-        let header = format_title `Cty name @ doc in
+        let header = format_title `Cty (make_name_from_path url) @ doc in
         let page = {Page.
           title = name ;
           header ;
@@ -1639,7 +1645,7 @@ struct
         let link = path url [inline @@ Text name] in
         let items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
-        let header = format_title `Arg name in
+        let header = format_title `Arg (make_name_from_path url) in
         let title = name in
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
@@ -1722,7 +1728,7 @@ and module_expansion
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
         let title = modname in
-        let header = format_title `Mod modname @ doc in
+        let header = format_title `Mod (make_name_from_path url) @ doc in
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
@@ -1796,7 +1802,7 @@ and module_expansion
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
         let title = modname in
-        let header = format_title `Mty modname @ doc in
+        let header = format_title `Mty (make_name_from_path url) @ doc in
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
@@ -1970,7 +1976,7 @@ struct
   let compilation_unit (t : Odoc_model.Lang.Compilation_unit.t) : Page.t =
     let title = Paths.Identifier.name t.id in
     let header =
-      format_title `Mod title  @ Comment.to_ir t.doc
+      format_title `Mod title @ Comment.to_ir t.doc
     in
     let url = Url.Path.from_identifier t.id in
     let items, toc, subpages =

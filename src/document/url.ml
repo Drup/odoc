@@ -88,13 +88,13 @@ module Path = struct
   let rec from_identifier : source -> t = function
     | `Root (abstr, unit_name) ->
       let parent = mk "package" abstr.Root.package in
-      let page = UnitName.to_string unit_name in
       let kind = "module" in
+      let page = UnitName.to_string unit_name in
       mk ~parent kind page
     | `Page (abstr, page_name) ->
       let parent = mk "package" abstr.Root.package in
-      let page = PageName.to_string page_name ^ ".html" in
       let kind = "page" in
+      let page = PageName.to_string page_name ^ ".html" in
       mk ~parent kind page
     | `Module (parent, mod_name) ->
       let parent = from_identifier (parent :> source) in
@@ -103,17 +103,13 @@ module Path = struct
       mk ~parent kind page
     | `Argument (functor_id, arg_num, arg_name) ->
       let parent = from_identifier (functor_id :> source) in
-      let kind = "argument" in
-      let page =
-        Printf.sprintf "%s-%d-%s" kind arg_num (ArgumentName.to_string arg_name)
-      in
+      let kind = Printf.sprintf "argument-%d" arg_num in
+      let page = ArgumentName.to_string arg_name in
       mk ~parent kind page
     | `ModuleType (parent, modt_name) ->
       let parent = from_identifier (parent :> source) in
       let kind = "module-type" in
-      let page =
-        Printf.sprintf "%s-%s" kind (ModuleTypeName.to_string modt_name)
-      in
+      let page = ModuleTypeName.to_string modt_name in
       mk ~parent kind page
     | `Class (parent, name) ->
       let parent = from_identifier (parent :> source) in
@@ -143,7 +139,7 @@ module Anchor = struct
     match parent with
     | None -> assert false (* We got a root, should never happen *)
     | Some page ->
-      let anchor = name in
+      let anchor = Printf.sprintf "%s-%s" kind name in
       { page ; anchor ; kind }
 
   let add_suffix ~kind { page ; anchor ; _ } suffix =
