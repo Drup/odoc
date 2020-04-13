@@ -75,7 +75,7 @@ let type_var tv =
   tag "type-var" (O.txt tv)
 
 let enclose ~l ~r x =
-  O.df "%s%t%s" l x r
+  O.span (O.df "%s%t%s" l x r)
 
 let path p txt = 
   O.df "%a" O.elt [inline @@ InternalLink (InternalLink.Resolved (Url.from_path p, txt))]
@@ -382,18 +382,20 @@ struct
   and package_subst (pkg_path : Paths.Path.ModuleType.t)
         (frag_typ, te : Paths.Fragment.Type.t * Odoc_model.Lang.TypeExpr.t)
     : text =
+    let typath = match pkg_path with
+    | `Resolved rp ->
+      let base =
+        (Paths.Path.Resolved.ModuleType.identifier rp :> Paths.Identifier.Signature.t)
+      in
+      Link.from_fragment ~base (frag_typ :> Paths.Fragment.t)
+    | _ ->
+      O.txt (Link.render_fragment (frag_typ :> Paths.Fragment.t))
+    in 
     O.keyword "type" ++
     O.txt " " ++
-    (match pkg_path with
-    | `Resolved rp ->
-      let base = (Paths.Path.Resolved.ModuleType.identifier rp :> Paths.Identifier.Signature.t) in
-      Link.from_fragment ~base
-        (frag_typ :> Paths.Fragment.t)
-    | _ ->
-      O.txt
-        (Link.render_fragment (frag_typ :> Paths.Fragment.t))) ++
-    O.txt " = " ++
-    type_expr te
+    typath ++
+      O.txt " = " ++
+      type_expr te
 end
 open Type_expression
 
@@ -1868,6 +1870,13 @@ and module_expansion
       O.txt " " ++
       module_decl' base md
 
+  (* TODO : Centralize the list juggling for type parameters *)
+  and type_expr_in_subst ~base td typath =
+    let typath = Link.from_fragment ~base typath in
+    match td.Lang.TypeDecl.Equation.params with
+    | [] -> typath
+    | l -> Syntax.Type.handle_substitution_params typath (format_params l)
+
   and substitution
     : Paths.Identifier.Signature.t -> Odoc_model.Lang.ModuleType.substitution
     -> text
@@ -1881,11 +1890,7 @@ and module_expansion
     | TypeEq (frag_typ, td) ->
       O.keyword "type" ++
       O.txt " " ++
-      (Syntax.Type.handle_substitution_params
-        (Link.from_fragment
-          ~base (frag_typ :> Paths.Fragment.t))
-        (format_params td.Lang.TypeDecl.Equation.params)
-      ) ++
+      type_expr_in_subst ~base td (frag_typ :> Paths.Fragment.t) ++
       fst (format_manifest td) ++
       format_constraints td.Odoc_model.Lang.TypeDecl.Equation.constraints
     | ModuleSubst (frag_mod, mod_path) ->
@@ -1898,11 +1903,7 @@ and module_expansion
     | TypeSubst (frag_typ, td) ->
       O.keyword "type" ++
       O.txt " " ++
-      (Syntax.Type.handle_substitution_params
-        (Link.from_fragment
-          ~base (frag_typ :> Paths.Fragment.t))
-        (format_params td.Lang.TypeDecl.Equation.params)
-      ) ++
+      type_expr_in_subst ~base td (frag_typ :> Paths.Fragment.t) ++
       O.txt " := " ++
       match td.Lang.TypeDecl.Equation.manifest with
       | None -> assert false (* cf loader/cmti *)

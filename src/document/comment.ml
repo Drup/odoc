@@ -86,13 +86,13 @@ module Reference = struct
     let open Reference in
     match ref with
     | `Root (s, _) ->
-      let ir = match text with
+      begin match text with
         | None ->
           let s = source_of_code (Odoc_model.Names.UnitName.to_string s) in
           [inline @@ Inline.Source s]
-        | Some s -> s
-      in
-      [inline @@ Inline.InternalLink (InternalLink.Unresolved ir)]
+        | Some s ->
+          [inline @@ Inline.InternalLink (InternalLink.Unresolved s)]
+      end
     | `Dot (parent, s) ->
       unresolved ?xref_base_uri ?text (parent :> t) s
     | `Module (parent, s) ->
@@ -214,36 +214,36 @@ let rec nestable_block_element
   : 'a. ?xref_base_uri:string ->
     Comment.nestable_block_element -> Block.one =
   fun ?xref_base_uri content ->
-  let desc = match content with
-    | `Paragraph [{value = `Raw_markup (target, s); _}] ->
-      Block.Raw_markup (target, s)
-    | `Paragraph content ->
-      Block.Paragraph (inline_element_list ?xref_base_uri content)
-    | `Code_block code ->
-      Source (source_of_code code)
-    | `Verbatim s -> Verbatim s
-    | `Modules ms ->
-      let items =
-        List.map
-          (fun r ->
-              [Block.{attr = [] ; desc = Inline (Reference.to_ir ?xref_base_uri ~stop_before:false r)}])
-          (ms :> Odoc_model.Paths.Reference.t list)
-      in
-      (* XXX "modules" class *)
-      Block.List (Unordered, items)
-    | `List (kind, items) ->
-      let kind = match kind with
-        | `Unordered -> Block.Unordered
-        | `Ordered -> Block.Ordered
-      in 
-      let items =
-        List.map
-          (nestable_block_element_list ?xref_base_uri)
-          items
-      in
-      Block.List (kind, items)
-  in
-  Block.{ attr = [] ; desc }
+  match content with
+  | `Paragraph [{value = `Raw_markup (target, s); _}] ->
+    block @@ Block.Raw_markup (target, s)
+  | `Paragraph content ->
+    block @@ Block.Paragraph (inline_element_list ?xref_base_uri content)
+  | `Code_block code ->
+    block @@ Source (source_of_code code)
+  | `Verbatim s ->
+    block @@ Verbatim s
+  | `Modules ms ->
+    let items =
+      List.map
+        (fun r ->
+            [block @@ Inline (Reference.to_ir ?xref_base_uri ~stop_before:false r)])
+        (ms :> Odoc_model.Paths.Reference.t list)
+    in
+    block ~attr:["modules"] @@ Block.List (Unordered, items)
+  | `List (kind, items) ->
+    let kind = match kind with
+      | `Unordered -> Block.Unordered
+      | `Ordered -> Block.Ordered
+    in
+    let f = function
+      | [{Odoc_model.Location_.value = `Paragraph content; _}] ->
+        [block @@ Block.Inline (inline_element_list ?xref_base_uri content)]
+      | item ->
+        nestable_block_element_list ?xref_base_uri item
+    in 
+    let items = List.map f items in
+    block @@ Block.List (kind, items)
 
 and nestable_block_element_list ?xref_base_uri elements =
   elements

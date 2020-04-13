@@ -29,6 +29,12 @@ type non_link_phrasing = Html_types.phrasing_without_interactive
 
 let optional_elt f ?a = function [] -> [] | l -> [f ?a l]
 
+let anchor_link anchor =
+  [ Html.a ~a:[Html.a_href ("#" ^ anchor); Html.a_class ["anchor"]] []]
+
+let anchor_attrib anchor =
+  [ Html.a_id anchor; Html.a_class ["anchored"] ]
+
 let class_ (l : Class.t) =
   if l = [] then [] else [Html.a_class l]
 
@@ -63,6 +69,11 @@ let rec internallink ~xref_base_uri ?(a=[]) (t : InternalLink.t) = match t with
     let elt = (elt :> phrasing Html.elt) in
     [elt]
   | Unresolved content ->
+    (* let title =
+     *   Html.a_title (Printf.sprintf "unresolved reference to %S"
+     *       (ref_to_string ref)
+     * in *)
+    let a = Html.a_class ["xref-unresolved"] :: a in
     let elt = Html.span ~a (inline ~xref_base_uri content) in
     let elt = (elt :> phrasing Html.elt) in
     [elt]
@@ -122,9 +133,9 @@ and inline_nolink (l : Inline.t) : non_link_phrasing Html.elt list =
   Utils.list_concat_map ~f:one l
 
 let heading ~xref_base_uri ~a (h : Heading.t) =
-  let a = match h.label with
-    | Some id -> Html.a_id id :: a
-    | None -> a
+  let a, anchor = match h.label with
+    | Some id -> Html.a_id id :: a, anchor_link id
+    | None -> a, []
   in
   let content = inline ~xref_base_uri h.title in
   let mk =
@@ -136,7 +147,7 @@ let heading ~xref_base_uri ~a (h : Heading.t) =
     | 5 -> Html.h5
     | _ -> Html.h6
   in
-  mk ~a content
+  mk ~a (anchor @ content)
 
 
 let rec block_no_heading
@@ -204,16 +215,10 @@ let block ~xref_base_uri (l: Block.t) : [> flow] Html.elt list =
     | Verbatim s ->
       [Html.pre ~a [Html.txt s]]
     | Source c ->
-      as_flow @@ source (inline ~xref_base_uri) ~a c
+      [Html.pre ~a (source (inline ~xref_base_uri) c)]
   in 
   Utils.list_concat_map l ~f:one
 
-
-let anchor_link anchor =
-  [ Html.a ~a:[Html.a_href ("#" ^ anchor); Html.a_class ["anchor"]] []]
-
-let anchor_attrib anchor =
-  [ Html.a_id anchor; Html.a_class ["anchored"] ]
 
 let documentedSrc ~xref_base_uri (t : DocumentedSrc.t) =
   let rec coalece acc ?current (content : DocumentedSrc.t) =
@@ -300,9 +305,18 @@ let rec item ~xref_base_uri (t : Item.t) =
       | None -> [], []
     in
     let a = class_ (["spec"; "include"] @ attr) @ anchor_attrib in
-    [Html.div ~a
-        (anchor_link @ [Html.div ~a:[Html.a_class ["doc"]] docs] @ content)
-    ]
+    (* TODO : Why double div ??? *)
+    [Html.div [Html.div ~a
+          (anchor_link @ [Html.div ~a:[Html.a_class ["doc"]] (docs @ content)])
+    ]]
+  | Declaration ({Item. attr; anchor ; content}, []) ->
+    let anchor_attrib, anchor_link = match anchor with
+      | Some a -> anchor_attrib a, anchor_link a
+      | None -> [], []
+    in
+    let a = class_ attr @ anchor_attrib in
+    let content = documentedSrc ~xref_base_uri content in
+    [Html.div ~a (anchor_link @ content)]
   | Declaration ({Item. attr; anchor ; content}, docs) ->
     let anchor_attrib, anchor_link = match anchor with
       | Some a -> anchor_attrib a, anchor_link a
@@ -310,8 +324,8 @@ let rec item ~xref_base_uri (t : Item.t) =
     in
     let a = class_ attr @ anchor_attrib in
     let content = documentedSrc ~xref_base_uri content in
-    let docs = optional_elt Html.div (block_no_heading ~xref_base_uri docs) in
-    [Html.div ~a (anchor_link @ content)] @ docs
+    let docs = optional_elt Html.dd (block_no_heading ~xref_base_uri docs) in
+    [Html.dl (Html.dt ~a (anchor_link @ content) :: docs)]
   | Declarations (l, docs) -> 
     let content = List.map (fun {Item. attr; anchor ; content} ->
       let anchor_attrib, anchor_link = match anchor with
@@ -357,7 +371,7 @@ let rec subpage ?theme_uri ~xref_base_uri
     ({Page. title; header; items = i ; toc; subpages; url }) =
   Tree.enter (Odoc_document.Url.Path.last url) ;
   let header_docs =
-    render_toc toc @ block ~xref_base_uri header
+    block ~xref_base_uri header @ render_toc toc
   in
   let content = items ~xref_base_uri i in
   let subpages = List.map (subpage ?theme_uri ~xref_base_uri) subpages in
