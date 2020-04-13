@@ -31,8 +31,6 @@ module Path : sig
   val from_identifier : [< source] -> t
 
   val last : t -> string
-  val as_list : t -> string list
-  val to_string : ?base:string -> t -> string
 end
 
 module Anchor : sig
@@ -56,8 +54,6 @@ module Anchor : sig
 end
 
 type t = Anchor.t
-
-val to_string : ?base:string -> t -> string
 
 val from_path : Path.t -> t
 

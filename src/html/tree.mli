@@ -36,8 +36,6 @@ val traverse
   -> t
   -> unit
 
-type kind = [ `Arg | `Mod | `Mty | `Class | `Cty | `Page ]
-
 type uri =
   | Absolute of string
   | Relative of string
@@ -70,20 +68,8 @@ module Relative_link : sig
   val semantic_uris : bool ref
   (** Whether to generate pretty/semantics links or not. *)
 
-  module Id : sig
-    exception Not_linkable
+  val href : xref_base_uri:string option -> Url.t -> string
 
-    val href : xref_base_uri:string option -> Url.t -> string
-  end
-
-  (* val of_path : stop_before:bool -> Paths.Path.t
-   *   -> [> `A of [> `PCDATA ] | `PCDATA ] Html.elt list
-   * 
-   * val of_fragment : base:Paths.Identifier.Signature.t
-   *   -> Paths.Fragment.t
-   *   -> [> `A of [> `PCDATA ] | `PCDATA ] Html.elt list
-   * 
-   * val to_sub_element : kind:kind -> string -> [> `Href ] Html.attrib *)
 end
 
 (* val render_fragment : Paths.Fragment.t -> string *)

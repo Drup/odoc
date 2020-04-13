@@ -19,10 +19,7 @@
 module Html = Tyxml.Html
 module Url = Odoc_document.Url
 
-
 type syntax = OCaml | Reason
-
-type kind = [ `Arg | `Mod | `Mty | `Class | `Cty | `Page ]
 
 let string_of_syntax = function
   | OCaml -> "ml"
@@ -51,74 +48,59 @@ let leave () = ignore @@ Stack.pop path
 module Relative_link = struct
   let semantic_uris = ref false
 
-  module Id : sig
-    val href : xref_base_uri:string option -> Odoc_document.Url.t -> string
-  end = struct    
-    let rec drop_shared_prefix l1 l2 =
-      match l1, l2 with
-      | l1 :: l1s, l2 :: l2s when l1 = l2 ->
-        drop_shared_prefix l1s l2s
-      | _, _ -> l1, l2
+  let path_to_list url =
+    let rec loop acc {Url.Path. parent ; name ; kind } =
+      match parent with
+      | None -> name :: acc
+      | Some p ->
+        let s = if kind = "module" then name else Printf.sprintf "%s-%s" kind name in
+        loop (s :: acc) p
+    in
+    loop [] url
 
-    let href ~xref_base_uri { Url.Anchor. page; anchor; kind } =
-      let leaf = if !semantic_uris || kind = "page" then [] else ["index.html"] in
-      let target = Url.Path.as_list page @ leaf in
-      match xref_base_uri with
-      (* If xref_base_uri is defined, do not perform relative URI resolution. *)
-      | Some xref_base_uri ->
-        let page = xref_base_uri ^ String.concat "/" target in
-        begin match anchor with
-        | "" -> page
-        | anchor -> page ^ "#" ^ anchor
-        end
-      | None ->
-        let current_loc =
-          let path =
-            let _, is_page = Stack.top path in
-            if is_page then
-              (* Sadness. *)
-              let s = Stack.copy path in
-              ignore (Stack.pop s);
-              s
-            else path
-          in
-          List.map fst (stack_to_list path)
-        in
-        let current_from_common_ancestor, target_from_common_ancestor =
-          drop_shared_prefix current_loc target
-        in
-        let relative_target =
-          List.map (fun _ -> "..") current_from_common_ancestor
-          @ target_from_common_ancestor
-        in
-        let page = String.concat "/" relative_target in
-        begin match anchor with
-        | "" -> page
-        | anchor -> page ^ "#" ^ anchor
-        end
-  end
+  let rec drop_shared_prefix l1 l2 =
+    match l1, l2 with
+    | l1 :: l1s, l2 :: l2s when l1 = l2 ->
+      drop_shared_prefix l1s l2s
+    | _, _ -> l1, l2
 
-  (* let of_path ~stop_before p =
-   *   Of_path.to_html ~stop_before p
-   * 
-   * let of_fragment ~base frag =
-   *   Of_fragment.to_html ~stop_before:false base frag *)
-
-  (* let to_sub_element ~kind name =
-   *   (\* FIXME: Reuse [Url]. *\)
-   *   let prefix =
-   *     match kind with
-   *     | `Mod   -> ""
-   *     | `Mty   -> "module-type-"
-   *     | `Arg   -> "argument-"
-   *     | `Class -> "class-"
-   *     | `Cty   -> "class-type-"
-   *     | `Page  -> assert false
-   *   in
-   *   Html.a_href (prefix ^ name ^ (if !semantic_uris then "" else "/index.html")) *)
+  let href ~xref_base_uri { Url.Anchor. page; anchor; kind } =
+    let leaf = if !semantic_uris || kind = "page" then [] else ["index.html"] in
+    let target = path_to_list page @ leaf in
+    match xref_base_uri with
+    (* If xref_base_uri is defined, do not perform relative URI resolution. *)
+    | Some xref_base_uri ->
+      let page = xref_base_uri ^ String.concat "/" target in
+      begin match anchor with
+      | "" -> page
+      | anchor -> page ^ "#" ^ anchor
+      end
+    | None ->
+      let current_loc =
+        let path =
+          let _, is_page = Stack.top path in
+          if is_page then
+            (* Sadness. *)
+            let s = Stack.copy path in
+            ignore (Stack.pop s);
+            s
+          else path
+        in
+        List.map fst (stack_to_list path)
+      in
+      let current_from_common_ancestor, target_from_common_ancestor =
+        drop_shared_prefix current_loc target
+      in
+      let relative_target =
+        List.map (fun _ -> "..") current_from_common_ancestor
+        @ target_from_common_ancestor
+      in
+      let page = String.concat "/" relative_target in
+      begin match anchor with
+      | "" -> page
+      | anchor -> page ^ "#" ^ anchor
+      end
 end
-
-(* let render_fragment = Relative_link.Of_fragment.render_raw *)
 
 let page_creator ?(is_page=false) ?(theme_uri = Relative "./") ~path name header_docs content =
   let rec add_dotdot ~n acc =
@@ -170,35 +152,6 @@ let page_creator ?(is_page=false) ?(theme_uri = Relative "./") ~path name header
   in
 
   let wrapped_content : (Html_types.div_content Html.elt) list =
-    (* let title_prefix =
-     *   match is_page with
-     *   | None
-     *   | Some `Mod -> Some "Module"
-     *   | Some `Arg -> Some "Parameter"
-     *   | Some `Mty -> Some "Module type"
-     *   | Some `Cty -> Some "Class type"
-     *   | Some `Class -> Some "Class"
-     *   | Some  * `Page -> None
-    in *)
-
-    (* let header_docs =
-     *   if is_page then
-     *     header_docs
-     *   else
-     *     let title_heading =
-     *       Html.h1 [
-     *         Html.code [
-     *           (\* (\\* Shorten path to at most 2 levels *\\)
-     *            * match List.tl path |> List.rev with
-     *            * | y :: x :: _ -> Html.txt @@ x ^ "." ^ y
-     *            * | x :: _ -> Html.txt x
-     *            * | _ -> Html.txt "" (\\* error *\\) *\)
-     *           Html.txt name
-     *         ]
-     *       ]
-     *     in
-     *     title_heading::header_docs
-     * in *)
 
     let header_content =
       let dot = if !Relative_link.semantic_uris then "" else "index.html" in

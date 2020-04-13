@@ -57,7 +57,7 @@ and styled style = match style with
 
 let rec internallink ~xref_base_uri ?(a=[]) (t : InternalLink.t) = match t with
   | Resolved (uri, content) ->
-    let href = Tree.Relative_link.Id.href ~xref_base_uri uri in
+    let href = Tree.Relative_link.href ~xref_base_uri uri in
     let a = (a :> Html_types.a_attrib Html.attrib list) in
     let elt = Html.a ~a:(Html.a_href href :: a) (inline_nolink content) in
     let elt = (elt :> phrasing Html.elt) in

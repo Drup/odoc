@@ -66,23 +66,6 @@ module Path = struct
 
   let last t = t.name
 
-  let as_list url =
-    let rec loop acc { parent ; name ; _ } =
-      match parent with
-      | None -> name :: acc
-      | Some p -> loop (name :: acc) p
-    in
-    loop [] url
-
-  let rec to_string ?base { parent ; name ; _ } =
-    match parent with
-    | None ->
-      begin match base with
-      | None -> name
-      | Some s -> s ^ "/" ^ name
-      end 
-    | Some p -> to_string ?base p ^ "/" ^ name
-
   let mk ?parent kind name = { kind ; parent ; name }
 
   let rec from_identifier : source -> t = function
@@ -253,9 +236,6 @@ let from_path page = {Anchor. page ; anchor = "" ; kind = page.kind }
 
 let page x = x.Anchor.page
 
-let to_string ?base {Anchor. page; anchor; _ } =
-  Path.to_string ?base page ^ "#" ^ anchor
-    
 let from_identifier ~stop_before = function
   | #Path.source as p when not stop_before ->
     Ok (from_path @@ Path.from_identifier p)
