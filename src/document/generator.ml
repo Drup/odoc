@@ -1076,7 +1076,7 @@ struct
         let ir = match rendered_item with 
           | `Decl content ->
             let decl = {Item. content ; attr ; anchor } in
-            Item.Declarations ([decl], docs)
+            Item.Declaration (decl, docs)
           | `Nested content -> 
             Item.Nested ({Item. content ; attr ; anchor }, docs)
         in
@@ -1989,7 +1989,7 @@ struct
       let anchor = Some ("module-" ^ modname) in
       let attr = [] in
       let decl = {Item. anchor ; content ; attr } in
-      Item.Declarations ([decl], [])
+      Item.Declaration (decl, [])
     in
     List.map f t
 

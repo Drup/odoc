@@ -301,6 +301,15 @@ let rec item (t : Item.t) =
     [Html.div ~a
         (anchor_link @ [Html.div ~a:[Html.a_class ["doc"]] docs] @ content)
     ]
+  | Declaration ({Item. attr; anchor ; content}, docs) ->
+    let anchor_attrib, anchor_link = match anchor with
+      | Some a -> anchor_attrib a, anchor_link a
+      | None -> [], []
+    in
+    let a = class_ attr @ anchor_attrib in
+    let content = documentedSrc content in
+    let docs = optional_elt Html.div (block_no_heading docs) in
+    [Html.div ~a (anchor_link @ content)] @ docs
   | Declarations (l, docs) -> 
     let content = List.map (fun {Item. attr; anchor ; content} ->
       let anchor_attrib, anchor_link = match anchor with
