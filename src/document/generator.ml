@@ -1640,9 +1640,11 @@ struct
         in
         let url = Url.Path.from_identifier arg.id in
         let link = path url [inline @@ Text name] in
-        let items, toc, subpages = module_expansion expansion in
+        let prelude, items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
-        let header = format_title `Arg (make_name_from_path url) in
+        let header =
+          format_title `Arg (make_name_from_path url) @ prelude
+        in
         let title = name in
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
@@ -1658,15 +1660,15 @@ struct
 
 and module_expansion
   : Odoc_model.Lang.Module.expansion
-    -> Item.t list * toc * Page.t list
+    -> Block.t * Item.t list * toc * Page.t list
   = fun t ->
     match t with
     | AlreadyASig -> assert false
     | Signature sg ->
       let expansion, toc, subpages = signature sg in
-      expansion, toc, subpages
+      [], expansion, toc, subpages
     | Functor (args, sg) ->
-      let sig_ir, toc, subpages = signature sg in
+      let content, toc, subpages = signature sg in
       let params, params_subpages =
         List.fold_left (fun (args, subpages as acc) arg ->
           match arg with
@@ -1677,19 +1679,17 @@ and module_expansion
         )
           ([], []) args
       in
-      let prelude =
-        Item.Text [
-          block (Heading {
-            label = Some "heading" ; level = 3 ; title = [inline @@ Text "Parameters"];
-          });
-          block (List (Unordered, params));
-          block (Heading {
-            label = Some "heading" ; level = 3 ; title = [inline @@ Text "Signature"];
-          });
-        ]
+      let prelude = [
+        block (Heading {
+          label = Some "heading" ; level = 3 ; title = [inline @@ Text "Parameters"];
+        });
+        block (List (Unordered, params));
+        block (Heading {
+          label = Some "heading" ; level = 3 ; title = [inline @@ Text "Signature"];
+        });
+      ]
       in
-      let content = prelude :: sig_ir in
-      content, toc, params_subpages @ subpages
+      prelude, content, toc, params_subpages @ subpages
 
   and module_
       : Odoc_model.Lang.Signature.recursive ->
@@ -1718,12 +1718,14 @@ and module_expansion
           | e -> e
         in
         let doc = Comment.to_ir t.doc in
-        let items, toc, subpages = module_expansion expansion in
+        let prelude, items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
         let title = modname in
-        let header = format_title `Mod (make_name_from_path url) @ doc in
+        let header =
+          format_title `Mod (make_name_from_path url) @ doc @ prelude
+        in
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
@@ -1790,12 +1792,14 @@ and module_expansion
           | e -> e
         in
         let doc = Comment.to_ir t.doc in
-        let items, toc, subpages = module_expansion expansion in
+        let prelude, items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
         let title = modname in
-        let header = format_title `Mty (make_name_from_path url) @ doc in
+        let header =
+          format_title `Mty (make_name_from_path url) @ doc @ prelude
+        in
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
