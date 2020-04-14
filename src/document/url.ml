@@ -77,7 +77,7 @@ module Path = struct
     | `Page (abstr, page_name) ->
       let parent = mk "package" abstr.Root.package in
       let kind = "page" in
-      let page = PageName.to_string page_name ^ ".html" in
+      let page = PageName.to_string page_name in
       mk ~parent kind page
     | `Module (parent, mod_name) ->
       let parent = from_identifier (parent :> source) in
