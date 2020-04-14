@@ -342,6 +342,24 @@ let rec item ~xref_base_uri (t : Item.t) =
 
 and items ~xref_base_uri l = Utils.list_concat_map ~f:(item ~xref_base_uri) l
 
+
+let rec coalece_items acc ?current (item : Item.t list) =
+  let (+:?) x l = Option.fold ~none:l ~some:(fun x -> x :: l) x in
+  match current, item with
+  | current, [] ->
+    List.rev (current +:? acc)
+  | Some Item.Text text0, Text text :: content ->
+    coalece_items acc ~current:(Text (text0 @ text)) content
+  | current , Text text :: content ->
+    coalece_items (current +:? acc) ~current:(Item.Text text) content
+  | current , i :: content ->
+    coalece_items (current +:? acc) ~current:i content
+
+let page_content ~xref_base_uri l = 
+  match coalece_items [] l with
+  | [Item.Text t] -> (block ~xref_base_uri t :> item Html.elt list)
+  | l -> items ~xref_base_uri l
+
 let render_toc (toc : Toc.t) =
   let rec section {Toc. anchor ; text ; children } =
     let text = inline_nolink text in
@@ -373,7 +391,7 @@ let rec subpage ?theme_uri ~xref_base_uri
   let header_docs =
     block ~xref_base_uri header @ render_toc toc
   in
-  let content = items ~xref_base_uri i in
+  let content = page_content ~xref_base_uri i in
   let subpages = List.map (subpage ?theme_uri ~xref_base_uri) subpages in
   let page =
     Tree.make ?theme_uri ~header_docs ~url title content subpages
