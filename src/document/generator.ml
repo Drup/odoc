@@ -1999,7 +1999,7 @@ struct
     let title = Odoc_model.Names.PageName.to_string name in
     let url = Url.Path.from_identifier t.name in
     let items, doc, toc = Top_level_markup.lay_out_page t.content in
-    let header = format_title `Page title @ doc in
+    let header = doc in
     let toc = Top_level_markup.render_toc toc in
     {Page. title ; header ; items ; toc ; subpages = [] ; url }
 end
