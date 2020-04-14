@@ -213,7 +213,9 @@ let block ~xref_base_uri (l: Block.t) : [> flow] Html.elt list =
     | Description l ->
       [Html.dl ~a (Utils.list_concat_map l ~f:(fun (i,b) ->
           let i =
-            (inline ~xref_base_uri i : phrasing Html.elt list :> flow_no_heading Html.elt list)
+            (inline ~xref_base_uri i
+             : phrasing Html.elt list
+              :> flow_no_heading Html.elt list)
           in
           [Html.dt i ; Html.dd (block_no_heading ~xref_base_uri b) ]
         ))]
@@ -265,12 +267,15 @@ let documentedSrc ~xref_base_uri (t : DocumentedSrc.t) =
       | `T l ->
         let one {DocumentedSrc. attrs ; anchor ; code ; doc } =
           let content = match code with
-            | `D code -> (inline ~xref_base_uri code :> flow_no_heading Html.elt list)
+            | `D code ->
+              (inline ~xref_base_uri code :> flow_no_heading Html.elt list)
             | `N n -> to_html n
           in
           let doc = match doc with
             | [] -> []
-            | doc -> [Html.td ~a:(class_ ["doc"]) (block_no_heading ~xref_base_uri doc)]
+            | doc ->
+              [Html.td ~a:(class_ ["doc"])
+                  (block_no_heading ~xref_base_uri doc)]
           in
           Html.tr ~a:(anchor_attrib anchor)
             (Html.td ~a:(class_ attrs)
