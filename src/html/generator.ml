@@ -54,18 +54,24 @@ and source k ?a (t : Source.t) =
   in 
   optional_elt Html.code ?a (tokens t)
 
-and styled style = match style with
-  | `Bold -> Html.b
-  | `Italic -> Html.i
-  | `Emphasis -> Html.em
-  | `Superscript -> Html.sup
-  | `Subscript -> Html.sub
+and styled style ~emph_level = match style with
+  | `Emphasis ->
+    let a = if emph_level mod 2 = 0 then [] else [Html.a_class ["odd"]] in
+    emph_level+1, Html.em ~a
+  | `Bold -> emph_level, Html.b ~a:[]
+  | `Italic -> emph_level, Html.i ~a:[]
+  | `Superscript -> emph_level, Html.sup ~a:[]
+  | `Subscript -> emph_level, Html.sub ~a:[]
 
-let rec internallink ~xref_base_uri ?(a=[]) (t : InternalLink.t) = match t with
+let rec internallink
+    ~emph_level ~xref_base_uri
+    ?(a=[])
+    (t : InternalLink.t) = match t with
   | Resolved (uri, content) ->
     let href = Tree.Relative_link.href ~xref_base_uri uri in
     let a = (a :> Html_types.a_attrib Html.attrib list) in
-    let elt = Html.a ~a:(Html.a_href href :: a) (inline_nolink content) in
+    let elt = Html.a ~a:(Html.a_href href :: a)
+      (inline_nolink ~emph_level content) in
     let elt = (elt :> phrasing Html.elt) in
     [elt]
   | Unresolved content ->
@@ -74,18 +80,20 @@ let rec internallink ~xref_base_uri ?(a=[]) (t : InternalLink.t) = match t with
      *       (ref_to_string ref)
      * in *)
     let a = Html.a_class ["xref-unresolved"] :: a in
-    let elt = Html.span ~a (inline ~xref_base_uri content) in
+    let elt = Html.span ~a (inline ~emph_level ~xref_base_uri content) in
     let elt = (elt :> phrasing Html.elt) in
     [elt]
 
 and internallink_nolink
+    ~emph_level
     ~(a: Html_types.span_attrib Html.attrib list)
     (t : InternalLink.t) = match t with
   | Resolved (_, content)
   | Unresolved content ->
-    [Html.span ~a (inline_nolink content)]
+    [Html.span ~a (inline_nolink ~emph_level content)]
 
-and inline ~xref_base_uri (l : Inline.t) : phrasing Html.elt list =
+and inline
+    ?(emph_level=0) ~xref_base_uri (l : Inline.t) : phrasing Html.elt list =
   let one (t : Inline.one) = 
     let a = class_ t.attr in
     match t.desc with
@@ -96,20 +104,23 @@ and inline ~xref_base_uri (l : Inline.t) : phrasing Html.elt list =
     | Linebreak ->
       [Html.br ~a ()]
     | Styled (style, c) ->
-      [styled style (inline ~xref_base_uri c) ]
+      let emph_level, app_style = styled style ~emph_level in
+      [app_style @@ inline ~emph_level ~xref_base_uri c]
     | Link (href, c) ->
       let a = (a :> Html_types.a_attrib Html.attrib list) in
-      [Html.a ~a:(Html.a_href href :: a) (inline_nolink c)]
+      let content = inline_nolink ~emph_level c in
+      [Html.a ~a:(Html.a_href href :: a) content]
     | InternalLink c ->
-      internallink ~xref_base_uri ~a c
+      internallink ~emph_level ~xref_base_uri ~a c
     | Source c ->
-      source (inline ~xref_base_uri) ~a c
+      source (inline ~emph_level ~xref_base_uri) ~a c
     | Raw_markup r ->
       raw_markup r
   in
   Utils.list_concat_map ~f:one l
 
-and inline_nolink (l : Inline.t) : non_link_phrasing Html.elt list =
+and inline_nolink
+    ?(emph_level=0) (l : Inline.t) : non_link_phrasing Html.elt list =
   let one (t : Inline.one) = 
     let a = class_ t.attr in
     match t.desc with
@@ -120,13 +131,14 @@ and inline_nolink (l : Inline.t) : non_link_phrasing Html.elt list =
     | Linebreak ->
       [Html.br ~a ()]
     | Styled (style, c) ->
-      [styled style (inline_nolink c) ]
+      let emph_level, app_style = styled style ~emph_level in
+      [ app_style @@ inline_nolink ~emph_level c]
     | Link (_, c) ->
-      inline_nolink c
+      inline_nolink ~emph_level c
     | InternalLink c ->
-      internallink_nolink ~a c
+      internallink_nolink ~emph_level ~a c
     | Source c ->
-      source inline_nolink ~a c
+      source (inline_nolink ~emph_level) ~a c
     | Raw_markup r ->
       raw_markup r
   in
