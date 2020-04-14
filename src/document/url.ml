@@ -86,8 +86,10 @@ module Path = struct
       mk ~parent kind page
     | `Argument (functor_id, arg_num, arg_name) ->
       let parent = from_identifier (functor_id :> source) in
-      let kind = Printf.sprintf "argument-%d" arg_num in
-      let page = ArgumentName.to_string arg_name in
+      let kind = "argument" in
+      let page =
+        Printf.sprintf "%d-%s" arg_num (ArgumentName.to_string arg_name)
+      in
       mk ~parent kind page
     | `ModuleType (parent, modt_name) ->
       let parent = from_identifier (parent :> source) in
