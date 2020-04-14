@@ -18,16 +18,13 @@ open Odoc_document.Types
 
 module Location = Odoc_model.Location_
 module Paths = Odoc_model.Paths
-
-open Utils
+module Html = Tyxml.Html
 
 type item = Html_types.flow5
 type flow = Html_types.flow5_without_header_footer
 type flow_no_heading = Html_types.flow5_without_sectioning_heading_header_footer
 type phrasing = Html_types.phrasing
 type non_link_phrasing = Html_types.phrasing_without_interactive
-
-let optional_elt f ?a = function [] -> [] | l -> [f ?a l]
 
 let anchor_link anchor =
   [ Html.a ~a:[Html.a_href ("#" ^ anchor); Html.a_class ["anchor"]] []]
@@ -52,7 +49,7 @@ and source k ?a (t : Source.t) =
     | Tag (Some s, l) -> [Html.span ~a:[Html.a_class [s]] (tokens l)]
   and tokens t = Utils.list_concat_map t ~f:token
   in 
-  optional_elt Html.code ?a (tokens t)
+  Utils.optional_elt Html.code ?a (tokens t)
 
 and styled style ~emph_level = match style with
   | `Emphasis ->
@@ -336,7 +333,9 @@ let rec item ~xref_base_uri (t : Item.t) =
     in
     let a = class_ attr @ anchor_attrib in
     let content = documentedSrc ~xref_base_uri content in
-    let docs = optional_elt Html.dd (block_no_heading ~xref_base_uri docs) in
+    let docs =
+      Utils.optional_elt Html.dd (block_no_heading ~xref_base_uri docs)
+    in
     [Html.dl (Html.dt ~a (anchor_link @ content) :: docs)]
   | Declarations (l, docs) -> 
     let content = List.map (fun {Item. attr; anchor ; content} ->
@@ -349,7 +348,9 @@ let rec item ~xref_base_uri (t : Item.t) =
       Html.dt ~a (anchor_link @ content)
     ) l
     in 
-    let docs = optional_elt Html.dd (block_no_heading ~xref_base_uri docs) in
+    let docs =
+      Utils.optional_elt Html.dd (block_no_heading ~xref_base_uri docs)
+    in
     [Html.dl (content @ docs)]
 
 and items ~xref_base_uri l = Utils.list_concat_map ~f:(item ~xref_base_uri) l
