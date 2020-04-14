@@ -1016,13 +1016,13 @@ struct
   (* Comment state used to generate HTML and TOC for both mli and mld inputs. *)
   and comment_state = {
     input_comment : Odoc_model.Comment.docs;
-    acc_html : Item.t list;
+    acc_ir : Item.t list;
     acc_toc : toc;
   }
 
   let finish_comment_state (state : comment_state) =
     {state with
-      acc_html = List.rev state.acc_html;
+      acc_ir = List.rev state.acc_ir;
       acc_toc = List.rev state.acc_toc;
     }
 
@@ -1073,7 +1073,7 @@ struct
         section_items level_shift section_level {state with
             input_items;
             comment_state = { state.comment_state with
-              acc_html = ir :: state.comment_state.acc_html };
+              acc_ir = ir :: state.comment_state.acc_ir };
           }
 
       | `Nested_article item ->
@@ -1093,7 +1093,7 @@ struct
         section_items level_shift section_level { state with
           input_items;
           comment_state = { state.comment_state with
-            acc_html = ir :: state.comment_state.acc_html;
+            acc_ir = ir :: state.comment_state.acc_ir;
             acc_toc = List.rev_append toc state.comment_state.acc_toc;
           };
           acc_subpages = state.acc_subpages @ subpages;
@@ -1146,7 +1146,7 @@ struct
             { state with
               comment_state = {
                 input_comment;
-                acc_html = [];
+                acc_ir = [];
                 acc_toc = [];
               }
             }
@@ -1156,7 +1156,7 @@ struct
           in
           (* Wrap the nested section in a <section> element, and extend the
             table of contents. *)
-          let section = nested_section_state.comment_state.acc_html in
+          let section = nested_section_state.comment_state.acc_ir in
 
           let item = Item.Section (header, section) in
           
@@ -1175,7 +1175,7 @@ struct
              everything else. *)
           section_comment level_shift section_level {nested_section_state with
               comment_state = { nested_section_state.comment_state with
-                acc_html = item :: state.comment_state.acc_html;
+                acc_ir = item :: state.comment_state.acc_ir;
                 acc_toc = toc_entry :: state.comment_state.acc_toc;
               }
             }
@@ -1188,7 +1188,7 @@ struct
         section_comment level_shift section_level {state with
             comment_state = { state.comment_state with
               input_comment;
-              acc_html = item :: state.comment_state.acc_html;
+              acc_ir = item :: state.comment_state.acc_ir;
             }
           }
 
@@ -1199,7 +1199,7 @@ struct
         input_items = items;
         comment_state = {
           input_comment = [];
-          acc_html = [];
+          acc_ir = [];
           acc_toc = [];
         };
 
@@ -1212,7 +1212,7 @@ struct
       }
     in
     let state = section_items heading_level_shift `Title initial_state in
-    state.comment_state.acc_html, state.comment_state.acc_toc, state.acc_subpages
+    state.comment_state.acc_ir, state.comment_state.acc_toc, state.acc_subpages
 
 
   let rec page_section_comment ~header_docs section_level state =
@@ -1227,14 +1227,14 @@ struct
         let header_docs = heading_html @ more_comment_ir in
         let nested_section_state = {
           input_comment = input_comment;
-          acc_html = [];
+          acc_ir = [];
           acc_toc = [];
         } in
         let nested_section_state, header_docs =
           page_section_comment ~header_docs `Section nested_section_state in
-        let acc_html = state.acc_html @ nested_section_state.acc_html in
+        let acc_ir = state.acc_ir @ nested_section_state.acc_ir in
         page_section_comment ~header_docs section_level
-          { nested_section_state with acc_html }
+          { nested_section_state with acc_ir }
 
       | `Heading (level, _label, _content)
         when not (is_deeper_section_level level ~than:section_level) ->
@@ -1249,13 +1249,13 @@ struct
         in
         let nested_section_state = {
           input_comment = input_comment;
-          acc_html = [item];
+          acc_ir = [item];
           acc_toc = [];
         } in
         let nested_section_state, header_docs =
           page_section_comment ~header_docs level nested_section_state
         in
-        let acc_html = state.acc_html @ nested_section_state.acc_html in
+        let acc_ir = state.acc_ir @ nested_section_state.acc_ir in
 
         let acc_toc =
           let `Label (_, label) = label in
@@ -1267,7 +1267,7 @@ struct
           toc_entry :: state.acc_toc
         in
         page_section_comment ~header_docs section_level
-          { nested_section_state with acc_html; acc_toc }
+          { nested_section_state with acc_ir; acc_toc }
 
       | _ ->
         let content, input_comment =
@@ -1276,7 +1276,7 @@ struct
         let item = Item.Text content in
         page_section_comment ~header_docs section_level {state with
             input_comment;
-            acc_html = item :: state.acc_html;
+            acc_ir = item :: state.acc_ir;
           }
       end
 
@@ -1284,11 +1284,11 @@ struct
   let lay_out_page input_comment =
     let initial_state : comment_state = {
       input_comment;
-      acc_html = [];
+      acc_ir = [];
       acc_toc = [];
     } in
     let state, header_docs = page_section_comment ~header_docs:[] `Title initial_state in
-    state.acc_html, header_docs, state.acc_toc
+    state.acc_ir, header_docs, state.acc_toc
 
 
 
