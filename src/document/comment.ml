@@ -78,11 +78,10 @@ module Reference = struct
      call. *)
   let rec to_ir
     : ?text:Inline.t ->
-      ?xref_base_uri:string ->
       stop_before:bool ->
       Reference.t ->
       Inline.t =
-    fun ?text ?xref_base_uri ~stop_before ref ->
+    fun ?text ~stop_before ref ->
     let open Reference in
     match ref with
     | `Root (s, _) ->
@@ -94,33 +93,33 @@ module Reference = struct
           [inline @@ Inline.InternalLink (InternalLink.Unresolved s)]
       end
     | `Dot (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) s
+      unresolved ?text (parent :> t) s
     | `Module (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ModuleName.to_string s)
+      unresolved ?text (parent :> t) (ModuleName.to_string s)
     | `ModuleType (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ModuleTypeName.to_string s)
+      unresolved ?text (parent :> t) (ModuleTypeName.to_string s)
     | `Type (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (TypeName.to_string s)
+      unresolved ?text (parent :> t) (TypeName.to_string s)
     | `Constructor (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ConstructorName.to_string s)
+      unresolved ?text (parent :> t) (ConstructorName.to_string s)
     | `Field (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (FieldName.to_string s)
+      unresolved ?text (parent :> t) (FieldName.to_string s)
     | `Extension (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ExtensionName.to_string s)
+      unresolved ?text (parent :> t) (ExtensionName.to_string s)
     | `Exception (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ExceptionName.to_string s)
+      unresolved ?text (parent :> t) (ExceptionName.to_string s)
     | `Value (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ValueName.to_string s)
+      unresolved ?text (parent :> t) (ValueName.to_string s)
     | `Class (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ClassName.to_string s)
+      unresolved ?text (parent :> t) (ClassName.to_string s)
     | `ClassType (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (ClassTypeName.to_string s)
+      unresolved ?text (parent :> t) (ClassTypeName.to_string s)
     | `Method (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (MethodName.to_string s)
+      unresolved ?text (parent :> t) (MethodName.to_string s)
     | `InstanceVariable (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (InstanceVariableName.to_string s)
+      unresolved ?text (parent :> t) (InstanceVariableName.to_string s)
     | `Label (parent, s) ->
-      unresolved ?xref_base_uri ?text (parent :> t) (LabelName.to_string s)
+      unresolved ?text (parent :> t) (LabelName.to_string s)
     | `Resolved r ->
       (* IDENTIFIER MUST BE RENAMED TO DEFINITION. *)
       let id = Reference.Resolved.identifier r in
@@ -141,16 +140,15 @@ module Reference = struct
 
   and unresolved
     : ?text:Inline.t ->
-      ?xref_base_uri:string ->
       Reference.t ->
       string -> Inline.t =
-    fun ?text ?xref_base_uri parent field ->
+    fun ?text parent field ->
     match text with
     | Some s ->
       [inline @@ InternalLink (InternalLink.Unresolved s)]
     | None ->
       let tail = [inline @@ Text ("." ^ field) ] in
-      let content = to_ir ?xref_base_uri ~stop_before:true parent in
+      let content = to_ir ~stop_before:true parent in
       content @ tail
 end
 
@@ -181,11 +179,11 @@ let link_content =
 
 
 
-let rec inline_element ?xref_base_uri : Comment.inline_element -> Inline.t =
+let rec inline_element : Comment.inline_element -> Inline.t =
   function
   | #Comment.leaf_inline_element as e -> [leaf_inline_element e]
   | `Styled (style, content) ->
-    [inline @@ Styled (style, inline_element_list ?xref_base_uri content)]
+    [inline @@ Styled (style, inline_element_list content)]
   | `Reference (path, content) ->
     (* TODO Rework that ugly function. *)
     (* TODO References should be set in code style, if they are to code
@@ -195,7 +193,7 @@ let rec inline_element ?xref_base_uri : Comment.inline_element -> Inline.t =
       | [] -> None
       | _ -> Some (non_link_inline_element_list content) (* XXX Span *)
     in
-    Reference.to_ir ?text:content ?xref_base_uri ~stop_before:false path
+    Reference.to_ir ?text:content ~stop_before:false path
   | `Link (target, content) ->
     let content =
       match content with
@@ -204,21 +202,20 @@ let rec inline_element ?xref_base_uri : Comment.inline_element -> Inline.t =
     in
     [inline @@ Link (target, content)]
 
-and inline_element_list ?xref_base_uri elements =
+and inline_element_list elements =
   List.concat @@ List.map
-    (fun elt -> inline_element ?xref_base_uri elt.Odoc_model.Location_.value)
+    (fun elt -> inline_element elt.Odoc_model.Location_.value)
     elements
 
 
 let rec nestable_block_element
-  : 'a. ?xref_base_uri:string ->
-    Comment.nestable_block_element -> Block.one =
-  fun ?xref_base_uri content ->
+  : Comment.nestable_block_element -> Block.one =
+  fun content ->
   match content with
   | `Paragraph [{value = `Raw_markup (target, s); _}] ->
     block @@ Block.Raw_markup (target, s)
   | `Paragraph content ->
-    block @@ Block.Paragraph (inline_element_list ?xref_base_uri content)
+    block @@ Block.Paragraph (inline_element_list content)
   | `Code_block code ->
     block @@ Source (source_of_code code)
   | `Verbatim s ->
@@ -227,7 +224,7 @@ let rec nestable_block_element
     let items =
       List.map
         (fun r ->
-            [block @@ Inline (Reference.to_ir ?xref_base_uri ~stop_before:false r)])
+            [block @@ Inline (Reference.to_ir ~stop_before:false r)])
         (ms :> Odoc_model.Paths.Reference.t list)
     in
     block ~attr:["modules"] @@ Block.List (Unordered, items)
@@ -238,21 +235,20 @@ let rec nestable_block_element
     in
     let f = function
       | [{Odoc_model.Location_.value = `Paragraph content; _}] ->
-        [block @@ Block.Inline (inline_element_list ?xref_base_uri content)]
+        [block @@ Block.Inline (inline_element_list content)]
       | item ->
-        nestable_block_element_list ?xref_base_uri item
+        nestable_block_element_list item
     in 
     let items = List.map f items in
     block @@ Block.List (kind, items)
 
-and nestable_block_element_list ?xref_base_uri elements =
+and nestable_block_element_list elements =
   elements
   |> List.map Odoc_model.Location_.value
-  |> List.map (nestable_block_element ?xref_base_uri)
+  |> List.map nestable_block_element
 
-let tag : ?xref_base_uri:string ->
-  Comment.tag -> Block.one option =
-  fun ?xref_base_uri t ->
+let tag : Comment.tag -> Block.one option =
+  fun t ->
   let description a b =
     Some {Block. attr = [] ; desc = Description [ a, b ]} in
   match t with
@@ -263,19 +259,19 @@ let tag : ?xref_base_uri:string ->
   | `Deprecated content ->
     description
       [inline @@ Text "deprecated"]
-      (nestable_block_element_list ?xref_base_uri content)
+      (nestable_block_element_list content)
   | `Param (name, content) ->
     description
       [inline @@ Text "parameter "; inline @@ Text name]
-      (nestable_block_element_list ?xref_base_uri content)
+      (nestable_block_element_list content)
   | `Raise (name, content) ->
     description
       [inline @@ Text "raises "; inline @@ Text name]
-      (nestable_block_element_list ?xref_base_uri content)
+      (nestable_block_element_list content)
   | `Return content ->
     description
       [inline @@ Text "returns"]
-      (nestable_block_element_list ?xref_base_uri content)
+      (nestable_block_element_list content)
   | `See (kind, target, content) ->
     let target =
       match kind with
@@ -285,7 +281,7 @@ let tag : ?xref_base_uri:string ->
     in
     description
       [inline @@ Text "see "; inline @@ target]
-      (nestable_block_element_list ?xref_base_uri content)
+      (nestable_block_element_list content)
   | `Since s ->
     description
       [inline @@ Text "since"]
@@ -293,7 +289,7 @@ let tag : ?xref_base_uri:string ->
   | `Before (version, content) ->
     description
       [inline @@ Text "before "; inline @@ Text version]
-      (nestable_block_element_list ?xref_base_uri content)
+      (nestable_block_element_list content)
   | `Version s ->
     description
       [inline @@ Text "version"]
@@ -303,12 +299,9 @@ let tag : ?xref_base_uri:string ->
 
 
 
-let block_element
-  : ?xref_base_uri:string ->
-  Comment.block_element -> Block.one option =
-  fun ?xref_base_uri -> function
+let block_element : Comment.block_element -> Block.one option = function
   | #Comment.nestable_block_element as e ->
-    Some (nestable_block_element ?xref_base_uri e)
+    Some (nestable_block_element e)
 
   | `Heading (level, `Label (_, label), content) ->
     let label = Odoc_model.Names.LabelName.to_string label in
@@ -326,11 +319,11 @@ let block_element
     Some { attr = [] ; desc = Block.Heading {label; level; title}}
 
   | `Tag t ->
-    tag ?xref_base_uri t
+    tag t
 
-let block_element_list ?xref_base_uri elements =
+let block_element_list elements =
   List.fold_left (fun html_elements block ->
-    match block_element ?xref_base_uri block with
+    match block_element block with
     | Some e -> e::html_elements
     | None -> html_elements)
     [] elements
@@ -338,17 +331,16 @@ let block_element_list ?xref_base_uri elements =
 
 
 
-let first_to_ir ?xref_base_uri = function
+let first_to_ir = function
   | {Odoc_model.Location_.value = `Paragraph _ as first_paragraph ; _} ::_ ->
-    begin match block_element ?xref_base_uri first_paragraph with
+    begin match block_element first_paragraph with
     | Some element -> [element]
     | None -> []
     end
   | _ -> []
 
-let to_ir ?xref_base_uri (docs : Comment.docs) =
-  block_element_list ?xref_base_uri
-  @@ List.map (fun x -> x.Odoc_model.Location_.value) docs
+let to_ir (docs : Comment.docs) =
+  block_element_list @@ List.map (fun x -> x.Odoc_model.Location_.value) docs
 
 let has_doc docs =
   docs <> []
