@@ -35,28 +35,37 @@ type t = {
   children : t list
 }
 
-let path = Stack.create ()
+(* Translation of Url.Path *)
+module Path = struct
 
-let stack_to_list s =
-  let acc = ref [] in
-  Stack.iter (fun x -> acc := x :: !acc) s;
-  !acc
+  let to_list url =
+    let rec loop acc {Url.Path. parent ; name ; kind } =
+      match parent with
+      | None -> (kind,name) :: acc
+      | Some p -> loop ((kind, name) :: acc) p
+    in
+    loop [] url
 
-let enter ?(page=false) name = Stack.push (name, page) path
-let leave () = ignore @@ Stack.pop path
+  let for_printing url = List.map snd @@ to_list url
+
+  let segment_to_string (kind, name) =
+    if kind = "module" || kind = "package"
+    then name
+    else Printf.sprintf "%s-%s" kind name
+  let for_linking url = List.map segment_to_string @@ to_list url
+  let filename (url : Url.Path.t) = segment_to_string (url.kind, url.name)
+
+  let is_page url = (url.Url.Path.kind = "page")
+
+  let current : Url.Path.t option ref = ref None
+
+  let get () = Option.get !current
+end
+
+let enter (url : Url.Path.t) = Path.current := Some url
 
 module Relative_link = struct
   let semantic_uris = ref false
-
-  let path_to_list url =
-    let rec loop acc {Url.Path. parent ; name ; kind } =
-      match parent with
-      | None -> name :: acc
-      | Some p ->
-        let s = if kind = "module" then name else Printf.sprintf "%s-%s" kind name in
-        loop (s :: acc) p
-    in
-    loop [] url
 
   let rec drop_shared_prefix l1 l2 =
     match l1, l2 with
@@ -65,8 +74,9 @@ module Relative_link = struct
     | _, _ -> l1, l2
 
   let href ~xref_base_uri { Url.Anchor. page; anchor; kind } =
+    let path = Path.get () in
     let leaf = if !semantic_uris || kind = "page" then [] else ["index.html"] in
-    let target = path_to_list page @ leaf in
+    let target = Path.for_linking page @ leaf in
     match xref_base_uri with
     (* If xref_base_uri is defined, do not perform relative URI resolution. *)
     | Some xref_base_uri ->
@@ -77,16 +87,11 @@ module Relative_link = struct
       end
     | None ->
       let current_loc =
-        let path =
-          let _, is_page = Stack.top path in
-          if is_page then
-            (* Sadness. *)
-            let s = Stack.copy path in
-            ignore (Stack.pop s);
-            s
-          else path
-        in
-        List.map fst (stack_to_list path)
+        let l = Path.for_linking path in
+        if Path.is_page path then
+          (* Sadness. *)
+          List.tl l
+        else l
       in
       let current_from_common_ancestor, target_from_common_ancestor =
         drop_shared_prefix current_loc target
@@ -102,7 +107,9 @@ module Relative_link = struct
       end
 end
 
-let page_creator ?(is_page=false) ?(theme_uri = Relative "./") ~path name header_docs content =
+let page_creator ?(theme_uri = Relative "./") ~url name header_docs content =
+  let is_page = Path.is_page url in
+  let path = Path.for_printing url in
   let rec add_dotdot ~n acc =
     if n <= 0 then
       acc
@@ -203,11 +210,9 @@ let page_creator ?(is_page=false) ?(theme_uri = Relative "./") ~path name header
 
   html
 
-let make ?(header_docs = []) ?theme_uri title content children =
-  assert (not (Stack.is_empty path));
-  let name, is_page = Stack.top path in
-  let path    = List.map fst (stack_to_list path) in
-  let content = page_creator ~is_page ?theme_uri ~path title header_docs content in
+let make ?(header_docs = []) ?theme_uri ~url title content children =
+  let name    = Path.filename url in
+  let content = page_creator ?theme_uri ~url title header_docs content in
   { name; content; children }
 
 let traverse ~f t =

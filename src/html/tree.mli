@@ -25,11 +25,7 @@ type syntax = OCaml | Reason
 
 val string_of_syntax: syntax -> string
 
-type t = private {
-  name : string;
-  content : [ `Html ] Html.elt;
-  children : t list
-}
+type t
 
 val traverse
     : f:(parents:string list -> string -> [ `Html ] Html.elt -> unit)
@@ -45,9 +41,7 @@ type uri =
 (** These two functions are used to track the depth while building the tree,
     which is needed to produce correct links. *)
 
-val enter : ?page:bool -> string -> unit
-
-val leave : unit -> unit
+val enter : Url.Path.t -> unit
 
 (** {1 Page creator} *)
 
@@ -56,6 +50,7 @@ val leave : unit -> unit
 val make :
   ?header_docs:(Html_types.flow5_without_header_footer Html.elt) list ->
   ?theme_uri:uri ->
+  url:Url.Path.t ->
   string ->
   (Html_types.div_content Html.elt) list ->
   t list ->

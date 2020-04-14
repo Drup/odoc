@@ -28,20 +28,11 @@ let document_of_compilation_unit ~syntax v =
   | Odoc_html.Tree.OCaml -> Odoc_document.ML.compilation_unit v
 
 let to_html_tree_page ?theme_uri ~syntax v =
-  let package =
-    match v.Odoc_model.Lang.Page.name with
-    | `Page (a, _) -> a.package
-  in
-  Odoc_html.Generator.render ?theme_uri package @@
+  Odoc_html.Generator.render ?theme_uri @@
   document_of_page ~syntax v
 
 let to_html_tree_compilation_unit ?theme_uri ~syntax v =
-  let package =
-    match v.Odoc_model.Lang.Compilation_unit.id with
-    | `Root (a, _) -> a.package
-    | _ -> assert false
-  in
-  Odoc_html.Generator.render ?theme_uri package @@
+  Odoc_html.Generator.render ?theme_uri @@
   document_of_compilation_unit ~syntax v
 
 let from_odoc ~env ?(syntax=Odoc_html.Tree.OCaml) ?theme_uri ~output:root_dir input =

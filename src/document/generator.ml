@@ -1438,7 +1438,6 @@ struct
       match t.expansion with
       | None -> O.txt name, []
       | Some csig ->
-        (* Tree.enter ~kind:(`Class) name; *)
         let doc = Comment.to_ir t.doc in
         let items, toc, _ = class_signature csig in
         let toc = Top_level_markup.render_toc toc in
@@ -1454,7 +1453,6 @@ struct
         }
         in
         let link = path url [inline @@ Text name] in
-        (* Tree.leave (); *)
         link, [page]
     in
     let class_def_content =
@@ -1487,7 +1485,6 @@ struct
       match t.expansion with
       | None -> O.txt name, []
       | Some csig ->
-        (* Tree.enter ~kind:(`Cty) name; *)
         let url = Url.Path.from_identifier t.id in
         let doc = Comment.to_ir t.doc in
         let items, toc, _ = class_signature csig in
@@ -1503,7 +1500,6 @@ struct
         }
         in
         let link = path url [inline @@ Text name] in
-        (* Tree.leave (); *)
         link, [page]
     in
     let ctyp = 
@@ -1642,7 +1638,6 @@ struct
             end
           | e -> e
         in
-        (* Tree.enter ~kind:(`Arg) link_name; *)
         let url = Url.Path.from_identifier arg.id in
         let link = path url [inline @@ Text name] in
         let items, toc, subpages = module_expansion expansion in
@@ -1652,7 +1647,6 @@ struct
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
-        (* Tree.leave (); *)
         (
           link ++
           O.txt Syntax.Type.annotation_separator ++
@@ -1723,7 +1717,6 @@ and module_expansion
             end
           | e -> e
         in
-        (* Tree.enter ~kind:(`Mod) modname; *)
         let doc = Comment.to_ir t.doc in
         let items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
@@ -1734,7 +1727,6 @@ and module_expansion
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
-        (* Tree.leave (); *)
         link, [page]
     in
     let md_def_content =
@@ -1797,7 +1789,6 @@ and module_expansion
             end
           | e -> e
         in
-        (* Tree.enter ~kind:(`Mty) modname; *)
         let doc = Comment.to_ir t.doc in
         let items, toc, subpages = module_expansion expansion in
         let toc = Top_level_markup.render_toc toc in
@@ -1808,7 +1799,6 @@ and module_expansion
         let page = {Page.
           toc ; items ; subpages ; title ; header ; url ;
         } in
-        (* Tree.leave (); *)
         link, [page]
     in
     let mty_def =

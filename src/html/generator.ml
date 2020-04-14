@@ -369,20 +369,18 @@ let render_toc (toc : Toc.t) =
 
 let rec subpage ?theme_uri ~xref_base_uri
     ({Page. title; header; items = i ; toc; subpages; url }) =
-  Tree.enter (Odoc_document.Url.Path.last url) ;
+  Tree.enter url ;
   let header_docs =
     block ~xref_base_uri header @ render_toc toc
   in
   let content = items ~xref_base_uri i in
   let subpages = List.map (subpage ?theme_uri ~xref_base_uri) subpages in
   let page =
-    Tree.make ?theme_uri ~header_docs title content subpages
+    Tree.make ?theme_uri ~header_docs ~url title content subpages
   in
-  Tree.leave ();
   page
 
-let render ?theme_uri package page =
-  Tree.enter package;
+let render ?theme_uri page =
   subpage ?theme_uri ~xref_base_uri:None page
 
 let doc ~xref_base_uri b = (block ~xref_base_uri b :> item Html.elt list)
