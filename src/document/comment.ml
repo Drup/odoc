@@ -168,8 +168,7 @@ let rec non_link_inline_element
   | `Styled (style, content) ->
     inline @@ Styled (style, non_link_inline_element_list content)
 
-and non_link_inline_element_list :
-  _ -> Inline.t = fun elements ->
+and non_link_inline_element_list : _ -> Inline.t = fun elements ->
   List.map
     (fun elt -> non_link_inline_element elt.Odoc_model.Location_.value)
     elements
@@ -247,10 +246,8 @@ and nestable_block_element_list elements =
   |> List.map Odoc_model.Location_.value
   |> List.map nestable_block_element
 
-let tag : Comment.tag -> Block.one option =
-  fun t ->
-  let description a b =
-    Some {Block. attr = [] ; desc = Description [ a, b ]} in
+let tag : Comment.tag -> Block.t = fun t ->
+  let description a b = [block @@ Description [ a, b ]] in
   match t with
   | `Author s ->
     description
@@ -295,14 +292,11 @@ let tag : Comment.tag -> Block.one option =
       [inline @@ Text "version"]
       [{ attr = []; desc = Block.Inline [inline @@ Text s]}]
   | `Canonical _ | `Inline | `Open | `Closed ->
-    None
+    []
 
-
-
-let block_element : Comment.block_element -> Block.one option = function
+let block_element : Comment.block_element -> Block.t = function
   | #Comment.nestable_block_element as e ->
-    Some (nestable_block_element e)
-
+    [nestable_block_element e]
   | `Heading (level, `Label (_, label), content) ->
     let label = Odoc_model.Names.LabelName.to_string label in
     let title = non_link_inline_element_list content in
@@ -316,27 +310,17 @@ let block_element : Comment.block_element -> Block.one option = function
       | `Subparagraph -> 6
     in
     let label = Some label in
-    Some { attr = [] ; desc = Block.Heading {label; level; title}}
-
+    [block @@ Block.Heading {label; level; title}]
   | `Tag t ->
     tag t
 
 let block_element_list elements =
-  List.fold_left (fun html_elements block ->
-    match block_element block with
-    | Some e -> e::html_elements
-    | None -> html_elements)
-    [] elements
-  |> List.rev
-
-
+  List.concat @@ List.map block_element elements
 
 let first_to_ir = function
-  | {Odoc_model.Location_.value = `Paragraph _ as first_paragraph ; _} ::_ ->
-    begin match block_element first_paragraph with
-    | Some element -> [element]
-    | None -> []
-    end
+  | {Odoc_model.Location_.value = `Paragraph _ as first_paragraph ; _} ::_
+    ->
+    block_element first_paragraph
   | _ -> []
 
 let to_ir (docs : Comment.docs) =
