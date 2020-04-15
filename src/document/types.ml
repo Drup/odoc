@@ -107,7 +107,6 @@ and Block : sig
     | Description of (Inline.t * t) list
     | Source of Source.t
     | Verbatim of string
-    | Heading of Heading.t
     | Raw_markup of Raw_markup.t
     (* | DocumentedSrc of DocumentedSrc.t *)
     (* | Math_blk of Math.t *)
@@ -170,10 +169,11 @@ and Item : sig
   
   type t =
     | Text of text
+    | Heading of Heading.t
     | Declarations of declaration list * Block.t
     | Declaration of declaration * Block.t
     | Nested of Nested.t item * Block.t
-    | Section of Block.t * t list
+    | Section of Item.t list * t list
 
 end = Item
 
@@ -181,7 +181,7 @@ and Page : sig
 
   type t = {
     title : string ;
-    header : Block.t ;
+    header : Item.t list ;
     items : Item.t list ;
     subpages : t list ;
     url : Url.Path.t ;

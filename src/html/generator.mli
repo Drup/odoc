@@ -7,4 +7,4 @@ val render :
 val doc :
   xref_base_uri:string ->
   Types.Block.t ->
-  Html_types.flow5 Tyxml.Html.elt list
+  Html_types.flow5_without_header_footer Tyxml.Html.elt list

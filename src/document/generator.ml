@@ -35,7 +35,7 @@ open O.Infix
 let format_title kind name =
   let mk title =
     let level = 1 and label = None in 
-    [block @@ Block.Heading { level ; label ; title}]
+    [Item.Heading { level ; label ; title}]
   in
   let prefix s = mk (inline (Text (s ^" ")) :: O.code (O.txt name)) in
   match kind with
@@ -877,7 +877,7 @@ sig
     ((_, 'item) tagged_item) list -> Item.t list * Page.t list
 
   val lay_out_page :
-    Odoc_model.Comment.docs -> Item.t list * Block.t
+    Odoc_model.Comment.docs -> Item.t list * Item.t list
 end =
 struct
 
@@ -947,13 +947,14 @@ struct
     let rec scan_comment acc docs =
       match docs with
       | [] -> List.rev acc, docs
-      | block::rest ->
+      | block :: rest -> 
         match block.Location.value with
-        | `Heading _ -> List.rev acc, docs
-        | _ -> scan_comment (block :: acc) rest
+        | `Heading _ -> List.rev acc, docs 
+        | #Odoc_model.Comment.attached_block_element as doc ->
+          let content = Comment.attached_block_element doc in
+          scan_comment (content @ acc) rest
     in
-    let included, remaining = scan_comment [] docs in
-    let docs = Comment.to_ir included in
+    let docs, remaining = scan_comment [] docs in
     docs, remaining
 
 
@@ -1101,9 +1102,7 @@ struct
       match element.Location.value with
       | `Heading (level, label, content) ->
         let level = shift level_shift level in
-        let element =
-          { element with Location.value = `Heading (level, label, content) }
-        in
+        let h = `Heading (level, label, content) in
         if not (is_deeper_section_level level ~than:section_level) then
           {state with comment_state =
             finish_comment_state state.comment_state }
@@ -1116,10 +1115,10 @@ struct
              comment matter goes into a <header> element. The nested HTML will
              then be extended recursively by parsing more structure items,
              including, perhaps, additional comments in <aside> elements. *)
-          let heading_ir = Comment.to_ir [element] in
+          let heading_ir = Comment.heading h in
           let more_comment_ir, input_comment =
             render_comment_until_heading_or_end input_comment in
-          let header = heading_ir @ more_comment_ir in
+          let header = heading_ir @ [Item.Text more_comment_ir] in
           let nested_section_state =
             { state with
               comment_state = {
@@ -1186,11 +1185,11 @@ struct
     | [] -> state, header_docs
     | element::input_comment ->
       begin match element.Location.value with
-      | `Heading (`Title, _label, _content) ->
-        let heading_html = Comment.to_ir [element] in
+      | `Heading (`Title, _label, _content) as h ->
+        let heading_ir = Comment.heading h in
         let more_comment_ir, input_comment =
           render_comment_until_heading_or_end input_comment in
-        let header_docs = heading_html @ more_comment_ir in
+        let header_docs = heading_ir @ [Item.Text more_comment_ir] in
         let nested_section_state = {
           input_comment = input_comment;
           acc_ir = [];
@@ -1205,16 +1204,16 @@ struct
         when not (is_deeper_section_level level ~than:section_level) ->
           state, header_docs
 
-      | `Heading (level, _, _) ->
-        let heading_ir = Comment.to_ir [element] in
+      | `Heading (level, _, _) as h ->
+        let heading_ir = Comment.heading h in
         let more_comment_ir, input_comment =
           render_comment_until_heading_or_end input_comment in
         let item =
-          Item.Text (heading_ir @ more_comment_ir)
+          heading_ir @ [Item.Text more_comment_ir]
         in
         let nested_section_state = {
           input_comment = input_comment;
-          acc_ir = [item];
+          acc_ir = item;
         } in
         let nested_section_state, header_docs =
           page_section_comment ~header_docs level nested_section_state
@@ -1380,7 +1379,7 @@ struct
       match t.expansion with
       | None -> O.txt name, []
       | Some csig ->
-        let doc = Comment.to_ir t.doc in
+        let doc = Comment.standalone t.doc in
         let items, _ = class_signature csig in
         let url = Url.Path.from_identifier t.id in
         let header = format_title `Class (make_name_from_path url) @ doc in 
@@ -1425,7 +1424,7 @@ struct
       | None -> O.txt name, []
       | Some csig ->
         let url = Url.Path.from_identifier t.id in
-        let doc = Comment.to_ir t.doc in
+        let doc = Comment.standalone t.doc in
         let items, _ = class_signature csig in
         let header = format_title `Cty (make_name_from_path url) @ doc in
         let page = {Page.
@@ -1553,7 +1552,7 @@ struct
 
   and functor_argument
     : Odoc_model.Lang.FunctorParameter.parameter
-    -> Block.t * Page.t list
+    -> Inline.t * Page.t list
   = fun arg ->
     let open Odoc_model.Lang.FunctorParameter in
     let name = Paths.Identifier.name arg.id in
@@ -1591,12 +1590,12 @@ struct
           mty (arg.id :> Paths.Identifier.Signature.t) arg.expr
         ), [page]
     in
-    let region = O.codeblock def_div in
+    let region = O.code def_div in
     region, subtree
 
 and module_expansion
   : Odoc_model.Lang.Module.expansion
-    -> Block.t * Item.t list * Page.t list
+    -> Item.t list * Item.t list * Page.t list
   = fun t ->
     match t with
     | AlreadyASig -> assert false
@@ -1611,18 +1610,19 @@ and module_expansion
           | Odoc_model.Lang.FunctorParameter.Unit -> acc
           | Named arg ->
             let arg, arg_subpages = functor_argument arg in
-            (args @ [arg], subpages @ arg_subpages)
+            let content = [block @@ Inline arg] in
+            (args @ [content], subpages @ arg_subpages)
         )
           ([], []) args
       in
       let prelude = [
-        block (Heading {
+        Item.Heading {
           label = Some "heading" ; level = 3 ; title = [inline @@ Text "Parameters"];
-        });
-        block (List (Unordered, params));
-        block (Heading {
+        };
+        Item.Text [block (List (Unordered, params))];
+        Item.Heading {
           label = Some "heading" ; level = 3 ; title = [inline @@ Text "Signature"];
-        });
+        };
       ]
       in
       prelude, content, params_subpages @ subpages
@@ -1653,7 +1653,7 @@ and module_expansion
             end
           | e -> e
         in
-        let doc = Comment.to_ir t.doc in
+        let doc = Comment.standalone t.doc in
         let prelude, items, subpages = module_expansion expansion in
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
@@ -1724,7 +1724,7 @@ and module_expansion
             end
           | e -> e
         in
-        let doc = Comment.to_ir t.doc in
+        let doc = Comment.standalone t.doc in
         let prelude, items, subpages = module_expansion expansion in
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
@@ -1899,7 +1899,7 @@ struct
   let compilation_unit (t : Odoc_model.Lang.Compilation_unit.t) : Page.t =
     let title = Paths.Identifier.name t.id in
     let header =
-      format_title `Mod title @ Comment.to_ir t.doc
+      format_title `Mod title @ Comment.standalone t.doc
     in
     let url = Url.Path.from_identifier t.id in
     let items, subpages =
