@@ -885,14 +885,11 @@ sig
     render_leaf_item:('item -> rendered_item * Odoc_model.Comment.docs) ->
     render_nested_article:
       (heading_level_shift -> 'item ->
-         item * Odoc_model.Comment.docs * toc * Page.t list) ->
-    ((_, 'item) tagged_item) list -> Item.t list * toc * Page.t list
-
-  val render_toc :
-    toc -> Toc.t
+         item * Odoc_model.Comment.docs * Page.t list) ->
+    ((_, 'item) tagged_item) list -> Item.t list * Page.t list
 
   val lay_out_page :
-    Odoc_model.Comment.docs -> Item.t list * Block.t * toc
+    Odoc_model.Comment.docs -> Item.t list * Block.t
 end =
 struct
 
@@ -1005,21 +1002,19 @@ struct
     render_nested_article : 
       heading_level_shift -> 'item ->
       [`Decl of rendered_item | `Nested of Nested.t ] *
-        Odoc_model.Comment.docs * toc * Page.t list;
+        Odoc_model.Comment.docs * Page.t list;
   }
 
 
-  (* Comment state used to generate HTML and TOC for both mli and mld inputs. *)
+  (* Comment state used to generate HTML for both mli and mld inputs. *)
   and comment_state = {
     input_comment : Odoc_model.Comment.docs;
     acc_ir : Item.t list;
-    acc_toc : toc;
   }
 
   let finish_comment_state (state : comment_state) =
     {state with
       acc_ir = List.rev state.acc_ir;
-      acc_toc = List.rev state.acc_toc;
     }
 
   let level_to_int = function
@@ -1073,7 +1068,7 @@ struct
           }
 
       | `Nested_article item ->
-        let rendered_item, docs, toc, subpages =
+        let rendered_item, docs, subpages =
           state.render_nested_article (level_to_int section_level) item
         in
         let anchor = state.item_to_id item in
@@ -1090,7 +1085,6 @@ struct
           input_items;
           comment_state = { state.comment_state with
             acc_ir = ir :: state.comment_state.acc_ir;
-            acc_toc = List.rev_append toc state.comment_state.acc_toc;
           };
           acc_subpages = state.acc_subpages @ subpages;
         }
@@ -1143,7 +1137,6 @@ struct
               comment_state = {
                 input_comment;
                 acc_ir = [];
-                acc_toc = [];
               }
             }
           in
@@ -1156,15 +1149,6 @@ struct
 
           let item = Item.Section (header, section) in
           
-          let `Label (_, label) = label in
-          let toc_entry =
-            {
-              anchor = Odoc_model.Names.LabelName.to_string label;
-              text = content;
-              children = nested_section_state.comment_state.acc_toc;
-            }
-          in
-
           (* Continue parsing after the nested section. In practice, we have
              either run out of items, or the first thing in the input will be
              another section heading – the nested section will have consumed
@@ -1172,7 +1156,6 @@ struct
           section_comment level_shift section_level {nested_section_state with
               comment_state = { nested_section_state.comment_state with
                 acc_ir = item :: state.comment_state.acc_ir;
-                acc_toc = toc_entry :: state.comment_state.acc_toc;
               }
             }
 
@@ -1182,7 +1165,7 @@ struct
         in
         let item = Item.Text content in
         section_comment level_shift section_level {state with
-            comment_state = { state.comment_state with
+            comment_state = {
               input_comment;
               acc_ir = item :: state.comment_state.acc_ir;
             }
@@ -1196,7 +1179,6 @@ struct
         comment_state = {
           input_comment = [];
           acc_ir = [];
-          acc_toc = [];
         };
 
         acc_subpages = [];
@@ -1208,12 +1190,12 @@ struct
       }
     in
     let state = section_items heading_level_shift `Title initial_state in
-    state.comment_state.acc_ir, state.comment_state.acc_toc, state.acc_subpages
+    state.comment_state.acc_ir, state.acc_subpages
 
 
   let rec page_section_comment ~header_docs section_level state =
     match state.input_comment with
-    | [] -> {state with acc_toc = List.rev state.acc_toc}, header_docs
+    | [] -> state, header_docs
     | element::input_comment ->
       begin match element.Location.value with
       | `Heading (`Title, _label, _content) ->
@@ -1224,7 +1206,6 @@ struct
         let nested_section_state = {
           input_comment = input_comment;
           acc_ir = [];
-          acc_toc = [];
         } in
         let nested_section_state, header_docs =
           page_section_comment ~header_docs `Section nested_section_state in
@@ -1234,9 +1215,9 @@ struct
 
       | `Heading (level, _label, _content)
         when not (is_deeper_section_level level ~than:section_level) ->
-          {state with acc_toc = List.rev state.acc_toc}, header_docs
+          state, header_docs
 
-      | `Heading (level, label, content) ->
+      | `Heading (level, _, _) ->
         let heading_ir = Comment.to_ir [element] in
         let more_comment_ir, input_comment =
           render_comment_until_heading_or_end input_comment in
@@ -1246,58 +1227,35 @@ struct
         let nested_section_state = {
           input_comment = input_comment;
           acc_ir = [item];
-          acc_toc = [];
         } in
         let nested_section_state, header_docs =
           page_section_comment ~header_docs level nested_section_state
         in
         let acc_ir = state.acc_ir @ nested_section_state.acc_ir in
-
-        let acc_toc =
-          let `Label (_, label) = label in
-          let toc_entry = {
-            anchor = Odoc_model.Names.LabelName.to_string label;
-            text = content;
-            children = nested_section_state.acc_toc;
-          } in
-          toc_entry :: state.acc_toc
-        in
         page_section_comment ~header_docs section_level
-          { nested_section_state with acc_ir; acc_toc }
+          { nested_section_state with acc_ir }
 
       | _ ->
         let content, input_comment =
           render_comment_until_heading_or_end state.input_comment
         in
         let item = Item.Text content in
-        page_section_comment ~header_docs section_level {state with
+        page_section_comment ~header_docs section_level {
             input_comment;
             acc_ir = item :: state.acc_ir;
           }
       end
 
-
   let lay_out_page input_comment =
     let initial_state : comment_state = {
       input_comment;
       acc_ir = [];
-      acc_toc = [];
     } in
-    let state, header_docs = page_section_comment ~header_docs:[] `Title initial_state in
-    state.acc_ir, header_docs, state.acc_toc
-
-
-
-  let render_toc toc =
-    let rec section the_section =
-      let text = Comment.link_content the_section.text in
-      let anchor = the_section.anchor in
-      let children = sections the_section.children in
-      {Toc. text ; anchor ; children }
-    and sections the_sections =
-      List.map section the_sections
+    let state, header_docs =
+      page_section_comment ~header_docs:[] `Title initial_state
     in
-    sections toc
+    state.acc_ir, header_docs
+
 end
 
 let path_to_id path =
@@ -1311,11 +1269,11 @@ module Class :
 sig
   val class_ :
     Lang.Signature.recursive -> Lang.Class.t ->
-      Top_level_markup.item * Odoc_model.Comment.docs * toc * Page.t list
+      Top_level_markup.item * Odoc_model.Comment.docs * Page.t list
   
   val class_type :
     Lang.Signature.recursive -> Lang.ClassType.t ->
-      Top_level_markup.item * Odoc_model.Comment.docs * toc * Page.t list
+      Top_level_markup.item * Odoc_model.Comment.docs * Page.t list
 end =
 struct
   let class_signature_item_to_id : Lang.ClassSignature.item -> _ = function
@@ -1435,15 +1393,13 @@ struct
       | None -> O.txt name, []
       | Some csig ->
         let doc = Comment.to_ir t.doc in
-        let items, toc, _ = class_signature csig in
-        let toc = Top_level_markup.render_toc toc in
+        let items, _ = class_signature csig in
         let url = Url.Path.from_identifier t.id in
         let header = format_title `Class (make_name_from_path url) @ doc in 
         let page = {Page.
           title = name ;
           header ;
           items ;
-          toc ;
           subpages = [] ;
           url ;
         }
@@ -1468,8 +1424,7 @@ struct
         cd
     in
     let code = O.documentedSrc class_def_content in
-    `Decl code, t.doc, [], subtree
-
+    `Decl code, t.doc, subtree
 
   and class_type recursive (t : Odoc_model.Lang.ClassType.t) =
     let name = Paths.Identifier.name t.id in
@@ -1483,14 +1438,12 @@ struct
       | Some csig ->
         let url = Url.Path.from_identifier t.id in
         let doc = Comment.to_ir t.doc in
-        let items, toc, _ = class_signature csig in
-        let toc = Top_level_markup.render_toc toc in
+        let items, _ = class_signature csig in
         let header = format_title `Cty (make_name_from_path url) @ doc in
         let page = {Page.
           title = name ;
           header ;
           items ;
-          toc ;
           subpages = [] ;
           url ;
         }
@@ -1516,7 +1469,7 @@ struct
       expr
     in
     let code = O.documentedSrc ctyp in
-    `Decl code, t.doc, [], subtree
+    `Decl code, t.doc, subtree
 end
 open Class
 
@@ -1527,7 +1480,7 @@ sig
   val signature
     : ?heading_level_shift:Top_level_markup.heading_level_shift
     -> Lang.Signature.t
-    -> Item.t list * toc * Page.t list
+    -> Item.t list * Page.t list
 end =
 struct
   let signature_item_to_id : Lang.Signature.item -> _ = function
@@ -1636,14 +1589,13 @@ struct
         in
         let url = Url.Path.from_identifier arg.id in
         let link = path url [inline @@ Text name] in
-        let prelude, items, toc, subpages = module_expansion expansion in
-        let toc = Top_level_markup.render_toc toc in
+        let prelude, items, subpages = module_expansion expansion in
         let header =
           format_title `Arg (make_name_from_path url) @ prelude
         in
         let title = name in
         let page = {Page.
-          toc ; items ; subpages ; title ; header ; url ;
+          items ; subpages ; title ; header ; url ;
         } in
         (
           link ++
@@ -1656,15 +1608,15 @@ struct
 
 and module_expansion
   : Odoc_model.Lang.Module.expansion
-    -> Block.t * Item.t list * toc * Page.t list
+    -> Block.t * Item.t list * Page.t list
   = fun t ->
     match t with
     | AlreadyASig -> assert false
     | Signature sg ->
-      let expansion, toc, subpages = signature sg in
-      [], expansion, toc, subpages
+      let expansion, subpages = signature sg in
+      [], expansion, subpages
     | Functor (args, sg) ->
-      let content, toc, subpages = signature sg in
+      let content, subpages = signature sg in
       let params, params_subpages =
         List.fold_left (fun (args, subpages as acc) arg ->
           match arg with
@@ -1685,12 +1637,12 @@ and module_expansion
         });
       ]
       in
-      prelude, content, toc, params_subpages @ subpages
+      prelude, content, params_subpages @ subpages
 
   and module_
       : Odoc_model.Lang.Signature.recursive ->
         Odoc_model.Lang.Module.t ->
-        _ * Odoc_model.Comment.docs * toc * Page.t list
+        _ * Odoc_model.Comment.docs * Page.t list
       = fun recursive t ->
     let modname = Paths.Identifier.name t.id in
     let md =
@@ -1714,17 +1666,14 @@ and module_expansion
           | e -> e
         in
         let doc = Comment.to_ir t.doc in
-        let prelude, items, toc, subpages = module_expansion expansion in
-        let toc = Top_level_markup.render_toc toc in
+        let prelude, items, subpages = module_expansion expansion in
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
         let title = modname in
         let header =
           format_title `Mod (make_name_from_path url) @ doc @ prelude
         in
-        let page = {Page.
-          toc ; items ; subpages ; title ; header ; url ;
-        } in
+        let page = {Page. items ; subpages ; title ; header ; url } in
         link, [page]
     in
     let md_def_content =
@@ -1738,7 +1687,7 @@ and module_expansion
       keyword' ++ O.txt " " ++ modname ++ md ++
       (if Syntax.Mod.close_tag_semicolon then O.txt ";" else O.noop) in
     let region = O.documentedSrc md_def_content in
-    `Decl region, t.doc, [], subtree
+    `Decl region, t.doc, subtree
 
   and module_decl (base : Paths.Identifier.Signature.t) md =
     begin match md with
@@ -1788,17 +1737,14 @@ and module_expansion
           | e -> e
         in
         let doc = Comment.to_ir t.doc in
-        let prelude, items, toc, subpages = module_expansion expansion in
-        let toc = Top_level_markup.render_toc toc in
+        let prelude, items, subpages = module_expansion expansion in
         let url = Url.Path.from_identifier t.id in
         let link = path url [inline @@ Text modname] in
         let title = modname in
         let header =
           format_title `Mty (make_name_from_path url) @ doc @ prelude
         in
-        let page = {Page.
-          toc ; items ; subpages ; title ; header ; url ;
-        } in
+        let page = {Page. items ; subpages ; title ; header ; url} in
         link, [page]
     in
     let mty_def =
@@ -1813,7 +1759,7 @@ and module_expansion
       )
     in
     let region = O.documentedSrc mty_def in
-    `Decl region, t.doc, [], subtree
+    `Decl region, t.doc, subtree
 
   and mty
     : Paths.Identifier.Signature.t -> Odoc_model.Lang.ModuleType.expr -> text
@@ -1910,7 +1856,7 @@ and include_ heading_level_shift (t : Odoc_model.Lang.Include.t) =
     else if List.exists is_closed_tag t.doc then `Closed
     else `Default
   in
-  let items, toc, tree =
+  let items, tree =
     let heading_level_shift =
       if status = `Inline then
         Some heading_level_shift
@@ -1928,9 +1874,7 @@ and include_ heading_level_shift (t : Odoc_model.Lang.Include.t) =
     )
   in
   let nested = {Nested. items; status; summary} in
-  (* XXX Improve representation of toc *)
-  let toc = if status = `Inline then toc else [] in
-  `Nested nested, t.doc, toc, tree
+  `Nested nested, t.doc, tree
 
 end
 open Module
@@ -1970,16 +1914,15 @@ struct
       format_title `Mod title @ Comment.to_ir t.doc
     in
     let url = Url.Path.from_identifier t.id in
-    let items, toc, subpages =
+    let items, subpages =
       match t.content with
       | Module sign ->
-        let content, toc, subpages = signature sign in
-        let toc = Top_level_markup.render_toc toc in
-        content, toc, subpages
+        let content, subpages = signature sign in
+        content, subpages
       | Pack packed ->
-        pack packed, [], []
+        pack packed, []
     in
-    {Page. title ; header ; items ; toc ; subpages ; url }
+    {Page. title ; header ; items ; subpages ; url }
 
   let page (t : Odoc_model.Lang.Page.t) : Page.t =
     let name =
@@ -1988,10 +1931,9 @@ struct
     in
     let title = Odoc_model.Names.PageName.to_string name in
     let url = Url.Path.from_identifier t.name in
-    let items, doc, toc = Top_level_markup.lay_out_page t.content in
+    let items, doc = Top_level_markup.lay_out_page t.content in
     let header = doc in
-    let toc = Top_level_markup.render_toc toc in
-    {Page. title ; header ; items ; toc ; subpages = [] ; url }
+    {Page. title ; header ; items ; subpages = [] ; url }
 end
 include Page
 end

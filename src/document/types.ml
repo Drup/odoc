@@ -183,24 +183,11 @@ and Page : sig
     title : string ;
     header : Block.t ;
     items : Item.t list ;
-    toc : Toc.t ;
     subpages : t list ;
     url : Url.Path.t ;
   }
 
 end = Page
-
-and Toc : sig
-
-  type t = one list
-  
-  and one = {
-    anchor : string ;
-    text : Inline.t ;
-    children : t ;
-  }
-
-end = Toc
 
 let inline ?(attr=[]) desc = Inline.{attr ; desc}
 let block ?(attr=[]) desc = Block.{attr ; desc}
