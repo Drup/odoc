@@ -158,9 +158,9 @@ let heading ~resolve (h : Heading.t) =
   in
   mk ~a (anchor @ content)
 
-let rec block ~resolve (l: Block.t) : [> flow] Html.elt list =
+let rec block ~resolve (l: Block.t) : flow Html.elt list =
   let as_flow x =
-    (x : phrasing Html.elt list :> [> flow] Html.elt list)
+    (x : phrasing Html.elt list :> flow Html.elt list)
   in
   let one (t : Block.one) = 
     let a = class_ t.attr in
@@ -249,22 +249,62 @@ let documentedSrc ~resolve (t : DocumentedSrc.t) =
   in
   to_html @@ coalece [] t
 
-let rec item ~resolve (t : Item.t) : item Html.elt list =
+(* This coercion is actually sound, but is not currently accepted by Tyxml.
+   See https://github.com/ocsigen/tyxml/pull/265 for details
+   Can be replaced by a simple type coercion once this is fixed
+*)
+let flow_to_item
+  : flow Html.elt list -> item Html.elt list
+  = fun x -> Html.totl @@ Html.toeltl x
+
+let rec coalece_items acc ?current (item : Item.t list) =
+  let (+:?) x l = Utils.fold_option ~none:l ~some:(fun x -> x :: l) x in
+  match current, item with
+  | current, [] ->
+    List.rev (current +:? acc)
+  | Some Item.Text text0, Text text :: content ->
+    coalece_items acc ~current:(Text (text0 @ text)) content
+  | current , Text text :: content ->
+    coalece_items (current +:? acc) ~current:(Item.Text text) content
+  | current , i :: content ->
+    coalece_items (current +:? acc) ~current:i content
+
+let rec is_only_text l =
+  let is_text : Item.t -> _ = function
+    | Heading _ | Text _
+    | Declarations ([],_) -> true
+    | Section (doc, items) -> is_only_text doc && is_only_text items
+    | Declaration _ | Declarations _
+      -> false
+    | Nested ({ content = { items; _ }; _ },_)
+      -> is_only_text items
+  in
+  List.for_all is_text l
+
+let rec item ~resolve ~only_text (t : Item.t) : item Html.elt list =
   match t with
   | Text content ->
-    [Html.aside (block ~resolve content :> any Html.elt list)]
+    let content = flow_to_item @@ block ~resolve content in
+    if only_text then
+      content
+    else
+      [Html.aside (content :> any Html.elt list)]
   | Heading h ->
     [heading ~resolve h]
   | Section (header, content) ->
-    let h = items ~resolve header in
-    let content = (items ~resolve content :> any Html.elt list) in
+    let h = nested_items ~resolve header in
+    let content =
+      (items ~resolve ~only_text content :> any Html.elt list)
+    in
     [Html.section (Html.header h :: content )]
   | Nested
       ({ attr; anchor; content = { summary; status; items = i } }, docs)
     ->
     let docs = (block ~resolve docs :> any Html.elt list) in
     let summary = inline ~resolve summary in
-    let included_html = (items ~resolve i :> any Html.elt list) in
+    let included_html =
+      (items ~resolve ~only_text i :> any Html.elt list)
+    in
     let content : any Html.elt list =
       let mk b =
         let a = if b then [Html.a_open ()] else [] in
@@ -323,27 +363,13 @@ let rec item ~resolve (t : Item.t) : item Html.elt list =
     in
     [Html.dl (content @ docs)]
 
-and items ~resolve l : item Html.elt list =
-  Utils.list_concat_map ~f:(item ~resolve) l
+and items ~resolve ~only_text l : item Html.elt list =
+  Utils.list_concat_map ~f:(item ~resolve ~only_text) l
 
-
-let rec coalece_items acc ?current (item : Item.t list) =
-  let (+:?) x l = Utils.fold_option ~none:l ~some:(fun x -> x :: l) x in
-  match current, item with
-  | current, [] ->
-    List.rev (current +:? acc)
-  | Some Item.Text text0, Text text :: content ->
-    coalece_items acc ~current:(Text (text0 @ text)) content
-  | current , Text text :: content ->
-    coalece_items (current +:? acc) ~current:(Item.Text text) content
-  | current , i :: content ->
-    coalece_items (current +:? acc) ~current:i content
-
-let page_content ~resolve l : any Html.elt list = 
-  match coalece_items [] l with
-  | [Item.Text t] -> (block ~resolve t :> any Html.elt list)
-  | l -> (items ~resolve l :> any Html.elt list)
-
+and nested_items ~resolve l : item Html.elt list =
+  let l = coalece_items [] l in
+  let only_text = is_only_text l in
+  items ~resolve ~only_text l
 
 module Toc = struct
   open Odoc_document.Doctree
@@ -379,8 +405,8 @@ let rec subpage ?theme_uri
     ({Page. title; header; items = i ; subpages; url }) =
   let resolve = Link.Current url in
   let toc = Toc.from_items i in
-  let header = items ~resolve header @ toc in
-  let content = page_content ~resolve i in
+  let header = nested_items ~resolve header @ toc in
+  let content = (nested_items ~resolve i :> any Html.elt list) in
   let subpages = List.map (subpage ?theme_uri) subpages in
   let page =
     Tree.make ?theme_uri ~header ~url title content subpages
