@@ -52,18 +52,6 @@ let make_name_from_path {Url.Path. name ; parent ; _ } =
   | Some p ->
     Printf.sprintf "%s.%s" p.name name
 
-let rec flatmap ?sep ~f = function
-  | [] -> []
-  | [x] -> f x
-  | x :: xs ->
-    let hd = f x in
-    let tl = flatmap ?sep ~f xs in
-    match sep with
-    | None -> hd @ tl
-    | Some sep -> hd @ sep @ tl
-
-
-
 let label t ppf = match t with
   | Odoc_model.Lang.TypeExpr.Label s -> O.pf ppf "%s" s
   | Optional s -> O.pf ppf "?%t%s" (O.entity "#8288") s
@@ -554,7 +542,7 @@ struct
           Link.from_path ~stop_before:false (t.type_path :> Paths.Path.t) ++
           O.txt " += ")
       @ 
-        flatmap t.constructors
+        Utils.flatmap t.constructors
           ~f:extension_constructor
       @ 
         O.documentedSrc
