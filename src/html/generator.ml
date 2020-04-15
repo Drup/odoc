@@ -415,9 +415,10 @@ module Toc = struct
 end
 
 let rec subpage ?theme_uri
-    ({Page. title; header; items = i ; toc; subpages; url }) =
+    ({Page. title; header; items = i ; subpages; url }) =
   let resolve = Link.Current url in
-  let header = block ~resolve header @ render_toc toc in
+  let toc = Toc.from_items i in
+  let header = items ~resolve header @ toc in
   let content = page_content ~resolve i in
   let subpages = List.map (subpage ?theme_uri) subpages in
   let page =
