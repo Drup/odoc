@@ -22,8 +22,7 @@ module Html = Tyxml.Html
 
 type any = Html_types.flow5
 type item = Html_types.flow5_without_header_footer
-type flow = Html_types.flow5_without_header_footer
-type flow_no_heading = Html_types.flow5_without_sectioning_heading_header_footer
+type flow = Html_types.flow5_without_sectioning_heading_header_footer
 type phrasing = Html_types.phrasing
 type non_link_phrasing = Html_types.phrasing_without_interactive
 
@@ -159,41 +158,7 @@ let heading ~resolve (h : Heading.t) =
   in
   mk ~a (anchor @ content)
 
-
-let rec block_no_heading
-    ~resolve (l: Block.t) : flow_no_heading Html.elt list =
-  let as_flow x =
-    (x : phrasing Html.elt list :> [> flow_no_heading] Html.elt list)
-  in
-  let one (t : Block.one) = 
-    let a = class_ t.attr in
-    match t.desc with
-    | Inline i ->
-      if a = [] then
-        as_flow @@ inline ~resolve i
-      else
-        [Html.span ~a (inline ~resolve i)]
-    | Paragraph i ->
-      [Html.p ~a (inline ~resolve i)]
-    | List (typ, l) ->
-      let mk = match typ with Ordered -> Html.ol | Unordered -> Html.ul in
-      [mk ~a (List.map
-            (fun x -> Html.li (block_no_heading ~resolve x)) l)]
-    | Description l ->
-      [Html.dl ~a (Utils.list_concat_map l ~f:(fun (i,b) ->
-          let i = as_flow @@ inline ~resolve i in
-          [Html.dt i ; Html.dd (block_no_heading ~resolve b) ]
-        ))]
-    | Raw_markup r ->
-      raw_markup r
-    | Verbatim s ->
-      [Html.pre ~a [Html.txt s]]
-    | Source c ->
-      as_flow @@ source (inline ~resolve) ~a c
-  in 
-  Utils.list_concat_map l ~f:one
-
-let block ~resolve (l: Block.t) : [> flow] Html.elt list =
+let rec block ~resolve (l: Block.t) : [> flow] Html.elt list =
   let as_flow x =
     (x : phrasing Html.elt list :> [> flow] Html.elt list)
   in
@@ -209,15 +174,15 @@ let block ~resolve (l: Block.t) : [> flow] Html.elt list =
       [Html.p ~a (inline ~resolve i)]
     | List (typ, l) ->
       let mk = match typ with Ordered -> Html.ol | Unordered -> Html.ul in
-      [mk ~a (List.map (fun x -> Html.li (block_no_heading ~resolve x)) l)]
+      [mk ~a (List.map (fun x -> Html.li (block ~resolve x)) l)]
     | Description l ->
       [Html.dl ~a (Utils.list_concat_map l ~f:(fun (i,b) ->
           let i =
             (inline ~resolve i
              : phrasing Html.elt list
-              :> flow_no_heading Html.elt list)
+              :> flow Html.elt list)
           in
-          [Html.dt i ; Html.dd (block_no_heading ~resolve b) ]
+          [Html.dt i ; Html.dd (block ~resolve b) ]
         ))]
     | Raw_markup r ->
       raw_markup r
@@ -257,7 +222,7 @@ let documentedSrc ~resolve (t : DocumentedSrc.t) =
       let x = {DocumentedSrc. attrs ; anchor ; code ; doc } in
       coalece (current +:? acc) ~current:(`T [x]) content
   in
-  let rec to_html t : flow_no_heading Html.elt list =
+  let rec to_html t : flow Html.elt list =
     Utils.list_concat_map t ~f:(function 
       | `O (attr, code) ->
         let a = class_ attr in
@@ -266,14 +231,14 @@ let documentedSrc ~resolve (t : DocumentedSrc.t) =
         let one {DocumentedSrc. attrs ; anchor ; code ; doc } =
           let content = match code with
             | `D code ->
-              (inline ~resolve code :> flow_no_heading Html.elt list)
+              (inline ~resolve code :> flow Html.elt list)
             | `N n -> to_html n
           in
           let doc = match doc with
             | [] -> []
             | doc ->
               [Html.td ~a:(class_ ["doc"])
-                  (block_no_heading ~resolve doc)]
+                  (block ~resolve doc)]
           in
           Html.tr ~a:(anchor_attrib anchor)
             (Html.td ~a:(class_ attrs)
@@ -285,33 +250,30 @@ let documentedSrc ~resolve (t : DocumentedSrc.t) =
   to_html @@ coalece [] t
 
 let rec item ~resolve (t : Item.t) : item Html.elt list =
-  let as_any x = (x : flow Html.elt list :> any Html.elt list) in
   match t with
   | Text content ->
-    [Html.aside
-        (block ~resolve content
-          :> Html_types.flow5 Html.elt list)]
+    [Html.aside (block ~resolve content :> any Html.elt list)]
   | Heading h ->
     [heading ~resolve h]
   | Section (header, content) ->
     let h = items ~resolve header in
-    let content = items ~resolve content in
-    [Html.section (Html.header h :: as_any content )]
+    let content = (items ~resolve content :> any Html.elt list) in
+    [Html.section (Html.header h :: content )]
   | Nested
       ({ attr; anchor; content = { summary; status; items = i } }, docs)
     ->
-    let docs = as_any @@ block ~resolve docs in
+    let docs = (block ~resolve docs :> any Html.elt list) in
     let summary = inline ~resolve summary in
-    let included_html = items ~resolve i in
+    let included_html = (items ~resolve i :> any Html.elt list) in
     let content : any Html.elt list =
       let mk b =
         let a = if b then [Html.a_open ()] else [] in
         [Html.details ~a
             (Html.summary [Html.span ~a:[Html.a_class ["def"]] summary])
-            (as_any included_html)]
+            included_html]
       in
       match status with
-      | `Inline -> as_any included_html
+      | `Inline -> included_html
       | `Closed -> mk false        
       | `Open -> mk true
       | `Default -> mk !Tree.open_details
@@ -342,7 +304,7 @@ let rec item ~resolve (t : Item.t) : item Html.elt list =
     let a = class_ attr @ anchor_attrib in
     let content = documentedSrc ~resolve content in
     let docs =
-      Utils.optional_elt Html.dd (block_no_heading ~resolve docs)
+      Utils.optional_elt Html.dd (block ~resolve docs)
     in
     [Html.dl (Html.dt ~a (anchor_link @ content) :: docs)]
   | Declarations (l, docs) -> 
@@ -357,7 +319,7 @@ let rec item ~resolve (t : Item.t) : item Html.elt list =
     ) l
     in 
     let docs =
-      Utils.optional_elt Html.dd (block_no_heading ~resolve docs)
+      Utils.optional_elt Html.dd (block ~resolve docs)
     in
     [Html.dl (content @ docs)]
 
@@ -378,11 +340,10 @@ let rec coalece_items acc ?current (item : Item.t list) =
     coalece_items (current +:? acc) ~current:i content
 
 let page_content ~resolve l : any Html.elt list = 
-  let h = match coalece_items [] l with
-    | [Item.Text t] -> block ~resolve t
-    | l -> items ~resolve l
-  in
-  (h :> any Html.elt list)
+  match coalece_items [] l with
+  | [Item.Text t] -> (block ~resolve t :> any Html.elt list)
+  | l -> (items ~resolve l :> any Html.elt list)
+
 
 module Toc = struct
   open Odoc_document.Doctree
@@ -431,4 +392,4 @@ let render ?theme_uri page =
 
 let doc ~xref_base_uri b =
   let resolve = Link.Base xref_base_uri in
-  (block ~resolve b :> item Html.elt list)
+  block ~resolve b
